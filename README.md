@@ -123,6 +123,12 @@ That benchmark currently:
 - evaluates on held-out latent outcomes
 - compares `ERM`, common reweighting baselines, `group_dro`, and the selective-observation minimax estimator
 - supports the benchmark-ready DSSAT bundles currently exposed by `ag-survival-sim`
+  - `iowa_maize`
+  - `georgia_soybean`
+  - `kansas_wheat`
+  - `dtsp_rice`
+  - `georgia_peanut`
+  - `uafd_sunflower`
 
 To run all currently benchmark-ready DSSAT bundles in sequence:
 
