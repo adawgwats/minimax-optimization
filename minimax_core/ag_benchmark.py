@@ -93,6 +93,7 @@ class AgricultureBenchmarkConfig:
 class AgricultureDataset:
     linear: LinearDataset
     test_group_ids: list[str]
+    action_index_by_key: dict[tuple[str, str], int]
     label_scale: float
     label_unit: str
     observation_rate: float
@@ -184,14 +185,30 @@ class _MemoizedCropModel:
 class _LinearPredictivePolicy:
     parameters: list[float]
     actions: tuple[Any, ...]
+    action_index_by_key: dict[tuple[str, str], int]
+    planned_operating_cost: Callable[[Any, float], float] | None = None
 
     def choose_action(self, state: Any, scenario: Any) -> Any:
-        best_action = self.actions[0]
+        del scenario
+        feasible_actions = list(self.actions)
+        if self.planned_operating_cost is not None:
+            available_capital = state.cash + state.remaining_credit
+            feasible_actions = [
+                action
+                for action in self.actions
+                if self.planned_operating_cost(action, state.acres) <= available_capital
+            ] or list(self.actions)
+
+        best_action = feasible_actions[0]
         best_score = float("-inf")
-        for action in self.actions:
+        for action in feasible_actions:
             score = _dot_product(
                 self.parameters,
-                _featurize_decision(state=state, action=action, scenario=scenario),
+                _featurize_decision(
+                    state=state,
+                    action=action,
+                    action_index_by_key=self.action_index_by_key,
+                ),
             )
             if score > best_score:
                 best_score = score
@@ -238,6 +255,7 @@ def _require_ag_survival_sim() -> dict[str, Any]:
             generate_training_examples,
             get_benchmark_definition,
             list_benchmark_definitions,
+            planned_operating_cost,
         )
         from ag_survival_sim.simulator import FarmSimulator  # type: ignore[import-not-found]
     except ImportError as error:
@@ -258,6 +276,7 @@ def _require_ag_survival_sim() -> dict[str, Any]:
         "generate_training_examples": generate_training_examples,
         "get_benchmark_definition": get_benchmark_definition,
         "list_benchmark_definitions": list_benchmark_definitions,
+        "planned_operating_cost": planned_operating_cost,
     }
 
 
@@ -282,6 +301,10 @@ def _build_agriculture_dataset(config: AgricultureBenchmarkConfig, *, trial_inde
     get_benchmark_definition = ag["get_benchmark_definition"]
 
     benchmark = get_benchmark_definition(config.benchmark_name)
+    action_index_by_key = {
+        (action.crop, action.input_level): index
+        for index, action in enumerate(benchmark.actions)
+    }
     crop_model = build_benchmark_crop_model(
         config.benchmark_name,
         dssat_root=config.dssat_root,
@@ -331,7 +354,10 @@ def _build_agriculture_dataset(config: AgricultureBenchmarkConfig, *, trial_inde
 
     label_scale = 100_000.0 if config.target == "net_income" else 1.0
     label_unit = "USD" if config.target == "net_income" else "bu/ac"
-    latent_train_features = [_featurize_example(example) for example in train_examples]
+    latent_train_features = [
+        _featurize_example(example, action_index_by_key=action_index_by_key)
+        for example in train_examples
+    ]
     latent_train_labels = [_extract_label(example, config.target) / label_scale for example in train_examples]
     latent_train_group_ids = [example.group_id for example in train_examples]
     latent_train_path_indices = [int(example.path_index) for example in train_examples]
@@ -369,7 +395,10 @@ def _build_agriculture_dataset(config: AgricultureBenchmarkConfig, *, trial_inde
         label_scale=1.0,
     )
 
-    test_features = [_featurize_example(example) for example in test_examples]
+    test_features = [
+        _featurize_example(example, action_index_by_key=action_index_by_key)
+        for example in test_examples
+    ]
     test_labels = [_extract_label(example, config.target) / label_scale for example in test_examples]
     test_group_ids = [example.group_id for example in test_examples]
 
@@ -387,6 +416,7 @@ def _build_agriculture_dataset(config: AgricultureBenchmarkConfig, *, trial_inde
     return AgricultureDataset(
         linear=linear,
         test_group_ids=test_group_ids,
+        action_index_by_key=action_index_by_key,
         label_scale=label_scale,
         label_unit=label_unit,
         observation_rate=mnar_result.observation_rate,
@@ -431,40 +461,57 @@ def _featurize_fields(
     debt: float,
     credit_limit: float,
     acres: float,
-    input_level: str,
-    weather_regime: str,
+    year: int,
+    action_key: tuple[str, str],
+    action_index_by_key: dict[tuple[str, str], int],
 ) -> list[float]:
+    action_features = [0.0 for _ in action_index_by_key]
+    try:
+        action_features[action_index_by_key[action_key]] = 1.0
+    except KeyError as error:
+        raise KeyError(f"unknown action key for agriculture featurization: {action_key!r}") from error
+
     return [
         1.0,
         cash / 300_000.0,
         debt / 200_000.0,
         credit_limit / 200_000.0,
         acres / 500.0,
-        1.0 if input_level == "medium" else 0.0,
-        1.0 if weather_regime == "good" else 0.0,
-        1.0 if weather_regime == "drought" else 0.0,
+        year / 10.0,
+        *action_features,
     ]
 
 
-def _featurize_example(example: Any) -> list[float]:
+def _featurize_example(
+    example: Any,
+    *,
+    action_index_by_key: dict[tuple[str, str], int],
+) -> list[float]:
     return _featurize_fields(
         cash=example.cash,
         debt=example.debt,
         credit_limit=example.credit_limit,
         acres=example.acres,
-        input_level=example.input_level,
-        weather_regime=example.weather_regime,
+        year=int(example.year),
+        action_key=(str(example.crop), str(example.input_level)),
+        action_index_by_key=action_index_by_key,
     )
 
 
-def _featurize_decision(*, state: Any, action: Any, scenario: Any) -> list[float]:
+def _featurize_decision(
+    *,
+    state: Any,
+    action: Any,
+    action_index_by_key: dict[tuple[str, str], int],
+) -> list[float]:
     return _featurize_fields(
         cash=state.cash,
         debt=state.debt,
         credit_limit=state.credit_limit,
         acres=state.acres,
-        input_level=action.input_level,
-        weather_regime=scenario.weather_regime,
+        year=int(state.year),
+        action_key=(str(action.crop), str(action.input_level)),
+        action_index_by_key=action_index_by_key,
     )
 
 
@@ -518,6 +565,7 @@ def _run_policy_evaluation(
     config: AgricultureBenchmarkConfig,
     *,
     trial_index: int,
+    dataset: AgricultureDataset,
     method_parameters: dict[str, list[float]],
 ) -> tuple[dict[str, Any], dict[str, Any]]:
     ag = _require_ag_survival_sim()
@@ -528,6 +576,7 @@ def _run_policy_evaluation(
     build_benchmark_crop_model = ag["build_benchmark_crop_model"]
     evaluate_policies = ag["evaluate_policies"]
     get_benchmark_definition = ag["get_benchmark_definition"]
+    planned_operating_cost = ag["planned_operating_cost"]
 
     benchmark = get_benchmark_definition(config.benchmark_name)
     crop_model = build_benchmark_crop_model(
@@ -546,7 +595,12 @@ def _run_policy_evaluation(
         acres=config.acres,
     )
     policies = {
-        method_name: _LinearPredictivePolicy(parameters=parameters, actions=benchmark.actions)
+        method_name: _LinearPredictivePolicy(
+            parameters=parameters,
+            actions=benchmark.actions,
+            action_index_by_key=dataset.action_index_by_key,
+            planned_operating_cost=planned_operating_cost,
+        )
         for method_name, parameters in method_parameters.items()
     }
     learned_summary = evaluate_policies(
@@ -624,6 +678,7 @@ def run_agriculture_benchmark(
         policy_metrics, reference_policy_metrics = _run_policy_evaluation(
             config,
             trial_index=trial_index,
+            dataset=dataset,
             method_parameters=method_parameters,
         )
         for policy_name, metrics in reference_policy_metrics.items():

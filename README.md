@@ -186,6 +186,7 @@ That benchmark currently:
 - compares `ERM`, common reweighting baselines, `group_dro`, and the selective-observation minimax estimator
 - supports the benchmark-ready DSSAT bundles currently exposed by `ag-survival-sim`
   - `iowa_maize`
+  - `georgia_maize_management`
   - `georgia_soybean`
   - `kansas_wheat`
   - `dtsp_rice`
@@ -211,6 +212,12 @@ minimax-ag-benchmark --benchmark georgia_peanut --mnar-mode drop_unobserved --as
 ```
 
 The benchmark output now also includes static action references like `static_corn_low` and `static_corn_medium`. This makes it obvious when all learned estimators collapse to the same action policy even if their label-fit metrics differ.
+
+The current ag policy benchmark is also stricter than the first version:
+
+- learned policies no longer get realized weather regime as a decision-time feature
+- action features are benchmark-specific, so multi-action bundles are represented explicitly instead of collapsing into a single low/medium flag
+- the simulator now fails obviously unaffordable actions, which creates a real interaction between farm balance sheet and policy choice
 
 Install helper dependency:
 

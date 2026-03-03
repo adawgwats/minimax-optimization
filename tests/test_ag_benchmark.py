@@ -19,6 +19,8 @@ from minimax_core.ag_benchmark import (
 
 @dataclass(frozen=True)
 class _Example:
+    year: int
+    crop: str
     cash: float
     debt: float
     credit_limit: float
@@ -36,6 +38,8 @@ class _Example:
 def test_featurize_example_encodes_finance_action_and_weather() -> None:
     features = _featurize_example(
         _Example(
+            year=3,
+            crop="corn",
             cash=300_000.0,
             debt=100_000.0,
             credit_limit=175_000.0,
@@ -44,10 +48,11 @@ def test_featurize_example_encodes_finance_action_and_weather() -> None:
             weather_regime="drought",
             farm_alive_next_year=False,
             group_id="distressed",
-        )
+        ),
+        action_index_by_key={("corn", "low"): 0, ("corn", "medium"): 1},
     )
 
-    assert features == [1.0, 1.0, 0.5, 0.875, 1.0, 1.0, 0.0, 1.0]
+    assert features == [1.0, 1.0, 0.5, 0.875, 1.0, 0.3, 0.0, 1.0]
 
 
 def test_missing_proxy_uses_group_mean_before_global_mean() -> None:
@@ -171,6 +176,14 @@ def test_real_agriculture_benchmark_runs_for_nondefault_benchmark(tmp_path) -> N
         )
     except FileNotFoundError:
         pytest.skip("real DSSAT installation not available")
+    except OSError as error:
+        if getattr(error, "errno", None) == 28:
+            pytest.skip("insufficient disk space for DSSAT integration test")
+        raise
+    except Exception as error:
+        if "not enough space on the disk" in str(error).lower():
+            pytest.skip("insufficient disk space for DSSAT integration test")
+        raise
 
     assert summary.train_count > 0
     assert summary.test_count > 0
