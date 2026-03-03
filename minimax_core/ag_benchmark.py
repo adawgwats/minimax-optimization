@@ -22,6 +22,7 @@ from .gradient_validation import (
     _mse,
     _predict,
     train_robust_group,
+    train_robust_group_online,
     train_robust_score,
 )
 from .mnar import MNAR_VIEW_MODES, SyntheticMNARConfig, apply_synthetic_mnar, build_proxy_labels
@@ -34,6 +35,7 @@ AG_METHOD_ORDER = (
     "focal",
     "group_dro",
     "robust_group",
+    "robust_group_online",
     "robust_score",
     "oracle",
 )
@@ -64,6 +66,8 @@ class AgricultureBenchmarkConfig:
     acres: float = 500.0
     target: str = "net_income"
     include_score_baseline: bool = True
+    include_online_mnar_baseline: bool = True
+    assumed_observation_rate: float | None = None
     q1: Q1ObjectiveConfig = field(default_factory=Q1ObjectiveConfig)
 
     def __post_init__(self) -> None:
@@ -81,6 +85,8 @@ class AgricultureBenchmarkConfig:
             raise ValueError("target must be 'yield' or 'net_income'.")
         if self.mnar_mode not in MNAR_VIEW_MODES:
             raise ValueError(f"mnar_mode must be one of {MNAR_VIEW_MODES}.")
+        if self.assumed_observation_rate is not None and not 0.0 < self.assumed_observation_rate <= 1.0:
+            raise ValueError("assumed_observation_rate must be in (0, 1].")
 
 
 @dataclass(frozen=True)
@@ -442,7 +448,11 @@ def run_agriculture_benchmark(
         distressed_rates.append(dataset.distressed_observation_rate)
 
         baseline_config = _baseline_config_for_ag(config)
-        robust_group_config = _robust_config_for_ag(config, adversary_mode="group")
+        robust_group_config = _robust_config_for_ag(
+            config,
+            adversary_mode="group",
+            dataset_observation_rate=dataset.observation_rate,
+        )
         robust_score_config = _robust_config_for_ag(config, adversary_mode="score")
 
         method_parameters: dict[str, list[float]] = {
@@ -454,6 +464,11 @@ def run_agriculture_benchmark(
             "robust_group": train_robust_group(dataset.linear, robust_group_config),
             "oracle": train_oracle_baseline(dataset.linear, baseline_config),
         }
+        if config.include_online_mnar_baseline:
+            method_parameters["robust_group_online"] = train_robust_group_online(
+                dataset.linear,
+                robust_group_config,
+            )
         if config.include_score_baseline:
             method_parameters["robust_score"] = train_robust_score(
                 dataset.linear,
@@ -539,6 +554,7 @@ def _robust_config_for_ag(
     config: AgricultureBenchmarkConfig,
     *,
     adversary_mode: str,
+    dataset_observation_rate: float | None = None,
 ) -> GradientValidationConfig:
     return GradientValidationConfig(
         seed=config.seed,
@@ -547,6 +563,11 @@ def _robust_config_for_ag(
         adversary_mode=adversary_mode,
         learning_rate=config.learning_rate,
         epochs=config.epochs,
+        assumed_observation_rate=(
+            config.assumed_observation_rate
+            if config.assumed_observation_rate is not None
+            else dataset_observation_rate
+        ),
         q1=config.q1,
     )
 
@@ -626,6 +647,8 @@ def parse_args(argv: list[str] | None = None) -> AgricultureBenchmarkConfig:
     parser.add_argument("--q-max", type=float, default=Q1ObjectiveConfig.q_max)
     parser.add_argument("--adversary-step-size", type=float, default=Q1ObjectiveConfig.adversary_step_size)
     parser.add_argument("--exclude-score-baseline", action="store_true")
+    parser.add_argument("--exclude-online-mnar-baseline", action="store_true")
+    parser.add_argument("--assumed-observation-rate", type=float, default=None)
     parser.add_argument("--all-benchmarks", action="store_true")
     args = parser.parse_args(argv)
     return AgricultureBenchmarkConfig(
@@ -647,6 +670,8 @@ def parse_args(argv: list[str] | None = None) -> AgricultureBenchmarkConfig:
         dssat_root=args.dssat_root,
         target=args.target,
         include_score_baseline=not args.exclude_score_baseline,
+        include_online_mnar_baseline=not args.exclude_online_mnar_baseline,
+        assumed_observation_rate=args.assumed_observation_rate,
         q1=Q1ObjectiveConfig(
             q_min=args.q_min,
             q_max=args.q_max,

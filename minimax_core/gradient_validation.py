@@ -35,6 +35,8 @@ class GradientValidationConfig:
     learning_rate: float = 0.05
     epochs: int = 180
     min_observed_per_group: int = 1
+    online_mnar: bool = False
+    assumed_observation_rate: float | None = None
     q1: Q1ObjectiveConfig = field(default_factory=Q1ObjectiveConfig)
 
     def __post_init__(self) -> None:
@@ -50,6 +52,8 @@ class GradientValidationConfig:
             raise ValueError("epochs must be positive.")
         if self.min_observed_per_group <= 0:
             raise ValueError("min_observed_per_group must be positive.")
+        if self.assumed_observation_rate is not None and not 0.0 < self.assumed_observation_rate <= 1.0:
+            raise ValueError("assumed_observation_rate must be in (0, 1].")
         for name, bounds in (
             ("train_count_range", self.train_count_range),
             ("test_count_range", self.test_count_range),
@@ -97,6 +101,7 @@ class GradientTrialResult:
 class GradientValidationSummary:
     scenario: str
     adversary_mode: str
+    online_mnar: bool
     trials: int
     robust_beats_erm_rate: float
     mean_erm_test_mse: float
@@ -388,6 +393,11 @@ def train_robust(dataset: LinearDataset, config: GradientValidationConfig) -> li
 def train_robust_group(dataset: LinearDataset, config: GradientValidationConfig) -> list[float]:
     parameters = [0.0 for _ in dataset.train_features[0]]
     adversary = SelectiveObservationAdversary(config.q1)
+    empirical_observation_rate = (
+        sum(1 for observed in dataset.train_observed_mask if observed) / len(dataset.train_observed_mask)
+    )
+    assumed_observation_rate = config.assumed_observation_rate or empirical_observation_rate
+
     for _ in range(config.epochs):
         predictions = _predict(parameters, dataset.train_features)
         losses = [(prediction - label) ** 2 for prediction, label in zip(predictions, dataset.train_labels)]
@@ -396,6 +406,8 @@ def train_robust_group(dataset: LinearDataset, config: GradientValidationConfig)
             group_ids=dataset.train_group_ids,
             observed_mask=dataset.train_observed_mask,
         )
+        if config.online_mnar:
+            snapshot = replace(snapshot, observation_rate=assumed_observation_rate)
         q_values = adversary.update(snapshot)
         weights = compute_example_weights(
             snapshot,
@@ -415,6 +427,8 @@ def train_robust_score(dataset: LinearDataset, config: GradientValidationConfig)
     parameters = [0.0 for _ in dataset.train_features[0]]
     adversary = ScoreBasedObservationAdversary(config.q1)
     observation_rate = sum(1 for observed in dataset.train_observed_mask if observed) / len(dataset.train_observed_mask)
+    if config.assumed_observation_rate is not None:
+        observation_rate = config.assumed_observation_rate
 
     for _ in range(config.epochs):
         predictions = _predict(parameters, dataset.train_features)
@@ -439,6 +453,14 @@ def train_robust_score(dataset: LinearDataset, config: GradientValidationConfig)
             for parameter, gradient in zip(parameters, gradients)
         ]
     return parameters
+
+
+def train_robust_group_online(dataset: LinearDataset, config: GradientValidationConfig) -> list[float]:
+    return train_robust_group(dataset, replace(config, online_mnar=True))
+
+
+def train_robust_score_online(dataset: LinearDataset, config: GradientValidationConfig) -> list[float]:
+    return train_robust_score(dataset, replace(config, online_mnar=True))
 
 
 def train_oracle(dataset: LinearDataset, config: GradientValidationConfig) -> list[float]:
@@ -485,6 +507,7 @@ def summarize_gradient_trials(
     trials: list[GradientTrialResult],
     scenario: str,
     adversary_mode: str,
+    online_mnar: bool,
 ) -> GradientValidationSummary:
     if not trials:
         raise ValueError("summarize_gradient_trials requires at least one trial.")
@@ -492,6 +515,7 @@ def summarize_gradient_trials(
     return GradientValidationSummary(
         scenario=scenario,
         adversary_mode=adversary_mode,
+        online_mnar=online_mnar,
         trials=len(trials),
         robust_beats_erm_rate=robust_beats_erm / len(trials),
         mean_erm_test_mse=mean(trial.erm_test_mse for trial in trials),
@@ -518,7 +542,7 @@ def run_gradient_validation(
 ) -> tuple[list[GradientTrialResult], GradientValidationSummary]:
     rng = random.Random(config.seed)
     trials = [run_gradient_trial(index, rng, config) for index in range(config.trials)]
-    return trials, summarize_gradient_trials(trials, config.scenario, config.adversary_mode)
+    return trials, summarize_gradient_trials(trials, config.scenario, config.adversary_mode, config.online_mnar)
 
 
 def run_gradient_validation_suite(
@@ -537,6 +561,7 @@ def _format_summary(summary: GradientValidationSummary) -> str:
         "Gradient-based selective-observation validation summary",
         f"scenario: {summary.scenario}",
         f"adversary mode: {summary.adversary_mode}",
+        f"online MNAR: {summary.online_mnar}",
         f"trials: {summary.trials}",
         f"robust beats ERM by test MSE: {summary.robust_beats_erm_rate:.3f}",
         f"mean ERM test MSE: {summary.mean_erm_test_mse:.6f}",
@@ -574,6 +599,8 @@ def parse_args(argv: list[str] | None = None) -> GradientValidationConfig:
     parser.add_argument("--q-min", type=float, default=Q1ObjectiveConfig.q_min)
     parser.add_argument("--q-max", type=float, default=Q1ObjectiveConfig.q_max)
     parser.add_argument("--adversary-step-size", type=float, default=Q1ObjectiveConfig.adversary_step_size)
+    parser.add_argument("--online-mnar", action="store_true")
+    parser.add_argument("--assumed-observation-rate", type=float, default=None)
     args = parser.parse_args(argv)
     return GradientValidationConfig(
         seed=args.seed,
@@ -582,6 +609,8 @@ def parse_args(argv: list[str] | None = None) -> GradientValidationConfig:
         adversary_mode=args.adversary_mode,
         learning_rate=args.learning_rate,
         epochs=args.epochs,
+        online_mnar=args.online_mnar,
+        assumed_observation_rate=args.assumed_observation_rate,
         q1=Q1ObjectiveConfig(
             q_min=args.q_min,
             q_max=args.q_max,

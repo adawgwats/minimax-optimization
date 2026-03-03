@@ -142,3 +142,4 @@ def test_real_agriculture_benchmark_runs_for_nondefault_benchmark(tmp_path) -> N
     assert summary.test_count > 0
     assert summary.benchmark_name == "georgia_soybean"
     assert summary.methods["robust_group"].mean_test_rmse >= 0.0
+    assert summary.methods["robust_group_online"].mean_test_rmse >= 0.0

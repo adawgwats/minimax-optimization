@@ -123,6 +123,8 @@ This lets downstream benchmarks separate two cases cleanly:
 - MNAR is present and the learner is told which labels are missing
 - MNAR is present but the learner only sees the survivor-biased dataset
 
+The agriculture benchmark now also exposes a training-time baseline, `robust_group_online`, that keeps the visible dataset fixed but lets the adversary impose an assumed observation-rate prior during optimization. This is the first step toward handling hidden survivorship bias when the dataset does not carry an explicit missingness flag.
+
 ## DSSAT-backed agriculture benchmark
 
 If `ag-survival-sim` is installed and DSSAT is available locally, you can run the benchmark-ready DSSAT crop bundles directly from this package:
@@ -155,6 +157,12 @@ To switch the agriculture benchmark into hidden sample-selection mode:
 
 ```bash
 minimax-ag-benchmark --benchmark georgia_peanut --mnar-mode drop_unobserved
+```
+
+To enable an explicit assumed observation-rate prior for the online MNAR baseline:
+
+```bash
+minimax-ag-benchmark --benchmark georgia_peanut --mnar-mode drop_unobserved --assumed-observation-rate 0.67
 ```
 
 Install helper dependency:

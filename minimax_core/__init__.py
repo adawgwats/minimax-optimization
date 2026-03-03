@@ -7,6 +7,9 @@ from .mnar import (
     SyntheticMNARResult,
     apply_synthetic_mnar,
     build_proxy_labels,
+    build_group_adversarial_mask,
+    sample_group_mnar_mask,
+    sample_score_mnar_mask,
 )
 from .objectives import (
     GroupSnapshot,
@@ -43,7 +46,10 @@ __all__ = [
     "SyntheticMNARResult",
     "TrialResult",
     "apply_synthetic_mnar",
+    "build_group_adversarial_mask",
     "build_proxy_labels",
+    "sample_group_mnar_mask",
+    "sample_score_mnar_mask",
     "compute_example_weights",
     "compute_score_based_weights",
     "empirical_risk",
@@ -59,6 +65,8 @@ __all__ = [
     "run_monte_carlo",
     "run_gradient_validation",
     "run_gradient_validation_suite",
+    "train_robust_group_online",
+    "train_robust_score_online",
     "run_baseline_comparison",
     "run_baseline_comparison_suite",
     "run_validation_suite",
@@ -88,6 +96,8 @@ def __getattr__(name: str):
         "run_baseline_comparison_suite",
         "run_gradient_validation",
         "run_gradient_validation_suite",
+        "train_robust_group_online",
+        "train_robust_score_online",
         "run_monte_carlo",
         "run_validation_suite",
     }:
@@ -113,6 +123,8 @@ def __getattr__(name: str):
             GradientValidationSummary,
             run_gradient_validation,
             run_gradient_validation_suite,
+            train_robust_group_online,
+            train_robust_score_online,
         )
         from .monte_carlo import (
             MonteCarloConfig,
@@ -143,6 +155,8 @@ def __getattr__(name: str):
             "run_baseline_comparison_suite": run_baseline_comparison_suite,
             "run_gradient_validation": run_gradient_validation,
             "run_gradient_validation_suite": run_gradient_validation_suite,
+            "train_robust_group_online": train_robust_group_online,
+            "train_robust_score_online": train_robust_score_online,
             "run_monte_carlo": run_monte_carlo,
             "run_validation_suite": run_validation_suite,
         }

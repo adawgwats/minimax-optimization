@@ -1,9 +1,10 @@
 from __future__ import annotations
 
 import random
+import math
 from dataclasses import dataclass
 from statistics import mean
-from typing import Sequence
+from typing import Mapping, Sequence
 
 
 MNAR_VIEW_MODES = (
@@ -44,6 +45,103 @@ class SyntheticMNARResult:
     observation_rate: float
     stable_observation_rate: float
     distressed_observation_rate: float
+
+
+def sample_group_mnar_mask(
+    *,
+    group_ids: Sequence[str],
+    base_observed_mask: Sequence[bool],
+    q_values: Mapping[str, float],
+    seed: int,
+    epoch_index: int,
+    min_observed_per_group: int = 1,
+) -> list[bool]:
+    if len(group_ids) != len(base_observed_mask):
+        raise ValueError("group_ids and base_observed_mask must have the same length.")
+
+    sampled_mask: list[bool] = []
+    eligible_by_group: dict[str, list[int]] = {}
+    retained_by_group: dict[str, list[int]] = {}
+
+    for index, (group_id, base_observed) in enumerate(zip(group_ids, base_observed_mask)):
+        if not base_observed:
+            sampled_mask.append(False)
+            continue
+        probability = float(q_values[group_id])
+        rng = random.Random(hash((seed, epoch_index, index, group_id, round(probability, 6))))
+        keep = rng.random() < probability
+        sampled_mask.append(keep)
+        eligible_by_group.setdefault(group_id, []).append(index)
+        if keep:
+            retained_by_group.setdefault(group_id, []).append(index)
+
+    _rescue_group_mask(
+        sampled_mask=sampled_mask,
+        eligible_by_group=eligible_by_group,
+        retained_by_group=retained_by_group,
+        minimum=min_observed_per_group,
+    )
+    return sampled_mask
+
+
+def build_group_adversarial_mask(
+    *,
+    group_ids: Sequence[str],
+    base_observed_mask: Sequence[bool],
+    q_values: Mapping[str, float],
+    losses: Sequence[float],
+    min_observed_per_group: int = 1,
+) -> list[bool]:
+    if not (len(group_ids) == len(base_observed_mask) == len(losses)):
+        raise ValueError("group_ids, base_observed_mask, and losses must have the same length.")
+
+    keep_mask = [False for _ in group_ids]
+    eligible_by_group: dict[str, list[int]] = {}
+    for index, (group_id, base_observed) in enumerate(zip(group_ids, base_observed_mask)):
+        if base_observed:
+            eligible_by_group.setdefault(group_id, []).append(index)
+
+    for group_id, indices in eligible_by_group.items():
+        if not indices:
+            continue
+        target_keep = math.ceil(float(q_values[group_id]) * len(indices))
+        target_keep = max(min_observed_per_group, min(len(indices), target_keep))
+        ranked = sorted(indices, key=lambda index: (float(losses[index]), index))
+        for index in ranked[:target_keep]:
+            keep_mask[index] = True
+    return keep_mask
+
+
+def sample_score_mnar_mask(
+    *,
+    base_observed_mask: Sequence[bool],
+    q_values: Sequence[float],
+    seed: int,
+    epoch_index: int,
+    min_observed: int = 1,
+) -> list[bool]:
+    if len(base_observed_mask) != len(q_values):
+        raise ValueError("base_observed_mask and q_values must have the same length.")
+
+    sampled_mask: list[bool] = []
+    eligible_indices: list[int] = []
+    retained_indices: list[int] = []
+    for index, (base_observed, probability) in enumerate(zip(base_observed_mask, q_values)):
+        if not base_observed:
+            sampled_mask.append(False)
+            continue
+        rng = random.Random(hash((seed, epoch_index, index, round(float(probability), 6))))
+        keep = rng.random() < float(probability)
+        sampled_mask.append(keep)
+        eligible_indices.append(index)
+        if keep:
+            retained_indices.append(index)
+
+    if eligible_indices and len(retained_indices) < min_observed:
+        ranked = sorted(eligible_indices, key=lambda idx: float(q_values[idx]), reverse=True)
+        for index in ranked[:min_observed]:
+            sampled_mask[index] = True
+    return sampled_mask
 
 
 def apply_synthetic_mnar(
@@ -181,6 +279,25 @@ def _build_keep_mask(
             continue
         keep_mask.append(True)
     return keep_mask
+
+
+def _rescue_group_mask(
+    *,
+    sampled_mask: list[bool],
+    eligible_by_group: Mapping[str, list[int]],
+    retained_by_group: Mapping[str, list[int]],
+    minimum: int,
+) -> None:
+    if minimum <= 0:
+        return
+    for group_id, eligible_indices in eligible_by_group.items():
+        currently_retained = len(retained_by_group.get(group_id, []))
+        if currently_retained >= minimum:
+            continue
+        missing = minimum - currently_retained
+        rescue_candidates = [index for index in eligible_indices if not sampled_mask[index]]
+        for index in rescue_candidates[:missing]:
+            sampled_mask[index] = True
 
 
 def _ensure_nonempty_training_view(

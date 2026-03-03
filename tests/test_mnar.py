@@ -1,6 +1,11 @@
 from __future__ import annotations
 
-from minimax_core.mnar import SyntheticMNARConfig, apply_synthetic_mnar, build_proxy_labels
+from minimax_core.mnar import (
+    SyntheticMNARConfig,
+    apply_synthetic_mnar,
+    build_group_adversarial_mask,
+    build_proxy_labels,
+)
 
 
 def test_explicit_missing_keeps_rows_but_marks_unobserved() -> None:
@@ -73,3 +78,14 @@ def test_build_proxy_labels_uses_group_then_global_means() -> None:
     )
 
     assert proxies == [1.0, 1.0, 1.0]
+
+
+def test_build_group_adversarial_mask_hides_harder_examples_within_group() -> None:
+    mask = build_group_adversarial_mask(
+        group_ids=["stable", "stable", "distressed", "distressed"],
+        base_observed_mask=[True, True, True, True],
+        q_values={"stable": 0.5, "distressed": 0.5},
+        losses=[0.1, 0.8, 0.2, 0.9],
+    )
+
+    assert mask == [True, False, True, False]

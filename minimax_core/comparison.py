@@ -16,6 +16,7 @@ from .gradient_validation import (
     _weighted_gradient,
     generate_linear_dataset,
     train_robust_group,
+    train_robust_group_online,
     train_robust_score,
 )
 
@@ -27,6 +28,7 @@ METHOD_ORDER = (
     "focal",
     "group_dro",
     "robust_group",
+    "robust_group_online",
     "robust_score",
     "oracle",
 )
@@ -328,6 +330,20 @@ def run_baseline_comparison(
             "focal": train_focal_baseline(dataset, config),
             "group_dro": train_group_dro_baseline(dataset, config),
             "robust_group": train_robust_group(dataset, gradient_config),
+            "robust_group_online": train_robust_group_online(
+                dataset,
+                replace(
+                    gradient_config,
+                    assumed_observation_rate=(
+                        gradient_config.assumed_observation_rate
+                        or (
+                            dataset.stable_observation_probability
+                            + dataset.distressed_observation_probability
+                        )
+                        / 2.0
+                    ),
+                ),
+            ),
             "robust_score": train_robust_score(dataset, gradient_config),
             "oracle": train_oracle_baseline(dataset, config),
         }
