@@ -19,6 +19,15 @@ hf = [
   "torch>=2.2",
   "transformers>=4.40",
 ]
+wilds = [
+  "accelerate>=0.28",
+  "datasets>=2.18",
+  "pyyaml>=6.0",
+  "scikit-learn>=1.4",
+  "torch>=2.2",
+  "transformers>=4.40",
+  "wilds>=2.0.0",
+]
 ag = [
   "ag-survival-sim @ git+https://github.com/adawgwats/ag-survival-sim.git",
 ]

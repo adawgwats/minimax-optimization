@@ -92,7 +92,7 @@ def loss_adapter(outputs, labels):
 
 Required:
 
-- `group_id`: metadata used by the adversary
+- `group_id`: metadata used by the adversary; this can be a single group id or a list of group ids for overlapping groups
 
 Optional:
 

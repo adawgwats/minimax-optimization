@@ -111,3 +111,27 @@ def test_minimax_data_collator_preserves_metadata_and_defaults_observed_mask() -
     assert batch["labels"] == [0, 1]
     assert batch["group_id"] == ["stable", "distressed"]
     assert batch["label_observed"] == [True, False]
+
+
+def test_minimax_data_collator_preserves_multi_membership_groups() -> None:
+    def base_collator(features: list[dict[str, object]]) -> dict[str, object]:
+        return {
+            "labels": [feature["labels"] for feature in features],
+            "input_ids": [feature["input_ids"] for feature in features],
+        }
+
+    collator = MinimaxDataCollator(
+        base_collator,
+        group_key="group_id",
+        observed_key="label_observed",
+    )
+
+    batch = collator(
+        [
+            {"input_ids": [1, 2], "labels": 0, "group_id": ["female", "black"]},
+            {"input_ids": [3, 4], "labels": 1, "group_id": ["male"]},
+        ]
+    )
+
+    assert batch["group_id"] == [["female", "black"], ["male"]]
+    assert batch["label_observed"] == [True, True]
