@@ -15,9 +15,13 @@ class MinimaxHFConfig:
     require_observed_key: bool = False
     task_type: TaskType = "sequence_classification"
     token_ignore_index: int = -100
+    online_mnar: bool = False
+    assumed_observation_rate: float | None = None
     q1: Q1ObjectiveConfig = Q1ObjectiveConfig()
 
     def __post_init__(self) -> None:
         valid_task_types = {"sequence_classification", "regression", "token_classification"}
         if self.task_type not in valid_task_types:
             raise ValueError(f"task_type must be one of {sorted(valid_task_types)}.")
+        if self.assumed_observation_rate is not None and not 0.0 < self.assumed_observation_rate <= 1.0:
+            raise ValueError("assumed_observation_rate must be in (0, 1].")

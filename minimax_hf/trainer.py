@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+from dataclasses import replace
 from typing import Any, Callable, Protocol
 
 from minimax_core import (
+    GroupSnapshot,
     SelectiveObservationAdversary,
     compute_example_weights,
     estimate_group_snapshot,
@@ -40,6 +42,23 @@ def _normalize_metadata(value: Any) -> list[Any]:
     if isinstance(value, tuple):
         return list(value)
     raise TypeError("metadata values must be tensors, lists, or tuples.")
+
+
+def _empirical_observation_rate(observed_mask: list[bool]) -> float:
+    if not observed_mask:
+        raise ValueError("observed_mask must contain at least one element.")
+    return sum(1.0 if observed else 0.0 for observed in observed_mask) / len(observed_mask)
+
+
+def _apply_online_mnar_assumption(
+    snapshot: GroupSnapshot,
+    observed_mask: list[bool],
+    config: MinimaxHFConfig,
+) -> GroupSnapshot:
+    if not config.online_mnar:
+        return snapshot
+    assumed_rate = config.assumed_observation_rate or _empirical_observation_rate(observed_mask)
+    return replace(snapshot, observation_rate=assumed_rate)
 
 
 if Trainer is None:
@@ -120,6 +139,11 @@ else:
                 losses=detached_losses,
                 group_ids=group_ids,
                 observed_mask=[bool(item) for item in observed_mask],
+            )
+            snapshot = _apply_online_mnar_assumption(
+                snapshot,
+                [bool(item) for item in observed_mask],
+                self.minimax_config,
             )
             q_values = (
                 self._adversary.update(snapshot)

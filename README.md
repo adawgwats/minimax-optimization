@@ -49,6 +49,22 @@ trainer = MinimaxTrainer(
 trainer.train()
 ```
 
+When the training set is survivor-biased and dropped rows are no longer explicitly marked, enable the first hidden-selection baseline directly in the HF adapter:
+
+```python
+trainer = MinimaxTrainer(
+    model=model,
+    args=training_args,
+    train_dataset=train_dataset,
+    eval_dataset=eval_dataset,
+    minimax_config=MinimaxHFConfig(
+        group_key="group_id",
+        online_mnar=True,
+        assumed_observation_rate=0.67,
+    ),
+)
+```
+
 ## What the adapter does for you
 
 - wraps the active HF data collator so `group_id` and `label_observed` survive batching
@@ -124,6 +140,34 @@ This lets downstream benchmarks separate two cases cleanly:
 - MNAR is present but the learner only sees the survivor-biased dataset
 
 The agriculture benchmark now also exposes a training-time baseline, `robust_group_online`, that keeps the visible dataset fixed but lets the adversary impose an assumed observation-rate prior during optimization. This is the first step toward handling hidden survivorship bias when the dataset does not carry an explicit missingness flag.
+
+HF users can reuse the same MNAR machinery directly on generic record datasets:
+
+```python
+from minimax_core import SyntheticMNARConfig
+from minimax_hf import build_synthetic_mnar_view
+
+view = build_synthetic_mnar_view(
+    raw_records,
+    config=SyntheticMNARConfig(
+        view_mode="drop_unobserved",
+        distressed_penalty=0.60,
+    ),
+    label_key="labels",
+    group_key="group_id",
+    path_key="path_index",
+    step_key="step_index",
+    distressed_group_values=["south_region", "late_season_failure"],
+)
+
+train_dataset = Dataset.from_list(view.rows)
+```
+
+Notes:
+
+- `explicit_missing` keeps rows and adds `label_observed`
+- `drop_unobserved` hides dropped rows completely and is the closer survivorship-bias model
+- `truncate_after_unobserved` needs a `path_key` because it drops the rest of a path after the first hidden failure
 
 ## DSSAT-backed agriculture benchmark
 

@@ -4,14 +4,17 @@ from dataclasses import dataclass
 
 import pytest
 
+from minimax_core import SyntheticMNARConfig, estimate_group_snapshot
 from minimax_hf import (
     DatasetSchemaError,
     MinimaxDataCollator,
     MinimaxHFConfig,
+    build_synthetic_mnar_view,
     build_loss_adapter,
     prepare_training_args,
     validate_dataset_columns,
 )
+from minimax_hf.trainer import _apply_online_mnar_assumption
 
 
 @dataclass(frozen=True)
@@ -44,6 +47,11 @@ def test_prepare_training_args_disables_remove_unused_columns() -> None:
 def test_minimax_hf_config_rejects_unknown_task_type() -> None:
     with pytest.raises(ValueError):
         MinimaxHFConfig(task_type="language_modeling")  # type: ignore[arg-type]
+
+
+def test_minimax_hf_config_rejects_invalid_assumed_observation_rate() -> None:
+    with pytest.raises(ValueError):
+        MinimaxHFConfig(assumed_observation_rate=1.2)
 
 
 def test_build_loss_adapter_supports_common_hf_tasks() -> None:
@@ -135,3 +143,116 @@ def test_minimax_data_collator_preserves_multi_membership_groups() -> None:
 
     assert batch["group_id"] == [["female", "black"], ["male"]]
     assert batch["label_observed"] == [True, True]
+
+
+def test_build_synthetic_mnar_view_preserves_rows_for_explicit_missing() -> None:
+    records = [
+        {"labels": 0.2, "group_id": "stable", "path_index": 0, "step_index": 0},
+        {"labels": -0.8, "group_id": "distressed", "path_index": 0, "step_index": 1},
+        {"labels": -1.1, "group_id": "distressed", "path_index": 1, "step_index": 0},
+    ]
+
+    view = build_synthetic_mnar_view(
+        records,
+        config=SyntheticMNARConfig(
+            seed=3,
+            view_mode="explicit_missing",
+            base_observation_probability=0.9,
+            distressed_penalty=0.8,
+        ),
+        path_key="path_index",
+        step_key="step_index",
+        latent_label_key="latent_label",
+    )
+
+    assert len(view.rows) == len(records)
+    assert all("label_observed" in row for row in view.rows)
+    assert all("latent_label" in row for row in view.rows)
+    assert any(not row["label_observed"] for row in view.rows)
+
+
+def test_build_synthetic_mnar_view_drops_unobserved_rows() -> None:
+    records = [
+        {"labels": 0.2, "group_id": "stable", "path_index": 0, "step_index": 0},
+        {"labels": -0.8, "group_id": "distressed", "path_index": 0, "step_index": 1},
+        {"labels": -1.1, "group_id": "distressed", "path_index": 1, "step_index": 0},
+    ]
+
+    view = build_synthetic_mnar_view(
+        records,
+        config=SyntheticMNARConfig(
+            seed=3,
+            view_mode="drop_unobserved",
+            base_observation_probability=0.9,
+            distressed_penalty=0.8,
+        ),
+        path_key="path_index",
+        step_key="step_index",
+    )
+
+    assert len(view.rows) < len(records)
+    assert all(row["label_observed"] for row in view.rows)
+    assert view.result.observation_rate < 1.0
+
+
+def test_build_synthetic_mnar_view_rejects_multi_membership_groups() -> None:
+    with pytest.raises(DatasetSchemaError):
+        build_synthetic_mnar_view(
+            [
+                {
+                    "labels": 1.0,
+                    "group_id": ["stable", "region_a"],
+                    "path_index": 0,
+                    "step_index": 0,
+                }
+            ],
+            config=SyntheticMNARConfig(),
+            path_key="path_index",
+            step_key="step_index",
+        )
+
+
+def test_build_synthetic_mnar_view_requires_path_for_truncation() -> None:
+    with pytest.raises(ValueError):
+        build_synthetic_mnar_view(
+            [{"labels": 1.0, "group_id": "stable"}],
+            config=SyntheticMNARConfig(view_mode="truncate_after_unobserved"),
+        )
+
+
+def test_build_synthetic_mnar_view_supports_custom_distressed_group_values() -> None:
+    view = build_synthetic_mnar_view(
+        [
+            {"labels": 0.2, "group_id": "north", "path_index": 0, "step_index": 0},
+            {"labels": 0.1, "group_id": "south", "path_index": 0, "step_index": 1},
+        ],
+        config=SyntheticMNARConfig(
+            seed=4,
+            view_mode="explicit_missing",
+            base_observation_probability=0.95,
+            distressed_penalty=0.8,
+        ),
+        path_key="path_index",
+        step_key="step_index",
+        distressed_group_values=["south"],
+    )
+
+    assert len(view.rows) == 2
+    assert any(not row["label_observed"] for row in view.rows)
+
+
+def test_apply_online_mnar_assumption_overrides_snapshot_rate() -> None:
+    snapshot = estimate_group_snapshot(
+        losses=[0.1, 0.5, 0.4],
+        group_ids=["stable", "distressed", "distressed"],
+        observed_mask=[True, True, False],
+    )
+
+    adjusted = _apply_online_mnar_assumption(
+        snapshot,
+        [True, True, False],
+        MinimaxHFConfig(online_mnar=True, assumed_observation_rate=0.4),
+    )
+
+    assert snapshot.observation_rate == pytest.approx(2 / 3)
+    assert adjusted.observation_rate == pytest.approx(0.4)

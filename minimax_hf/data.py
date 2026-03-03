@@ -1,11 +1,19 @@
 from __future__ import annotations
 
-from dataclasses import is_dataclass, replace
+from dataclasses import dataclass, is_dataclass, replace
 from typing import Any, Callable, Iterable, Mapping, Sequence
+
+from minimax_core import SyntheticMNARConfig, SyntheticMNARResult, apply_synthetic_mnar
 
 
 class DatasetSchemaError(ValueError):
     pass
+
+
+@dataclass(frozen=True)
+class SyntheticMNARView:
+    rows: list[dict[str, Any]]
+    result: SyntheticMNARResult
 
 
 def prepare_training_args(training_args: Any) -> Any:
@@ -66,6 +74,93 @@ def _sample_record(dataset: Any) -> Mapping[str, Any]:
     if not isinstance(sample, Mapping):
         raise DatasetSchemaError("dataset examples must behave like mappings.")
     return sample
+
+
+def build_synthetic_mnar_view(
+    records: Sequence[Mapping[str, Any]],
+    *,
+    config: SyntheticMNARConfig,
+    label_key: str = "labels",
+    group_key: str = "group_id",
+    observed_key: str = "label_observed",
+    path_key: str | None = None,
+    step_key: str | None = None,
+    weather_key: str | None = None,
+    alive_next_key: str | None = None,
+    latent_label_key: str | None = None,
+    distressed_group_values: Sequence[Any] | None = None,
+) -> SyntheticMNARView:
+    if not records:
+        return SyntheticMNARView(
+            rows=[],
+            result=SyntheticMNARResult(
+                observed_mask=(),
+                keep_mask=(),
+                observed_values=(),
+                observation_probabilities=(),
+                observation_rate=0.0,
+                stable_observation_rate=1.0,
+                distressed_observation_rate=1.0,
+            ),
+        )
+
+    if config.view_mode == "truncate_after_unobserved" and path_key is None:
+        raise ValueError("path_key is required for truncate_after_unobserved views.")
+
+    copied_records = [dict(record) for record in records]
+    labels: list[float] = []
+    group_ids: list[str] = []
+    path_indices: list[int] = []
+    step_indices: list[int] = []
+    weather_regimes: list[str] | None = [] if weather_key is not None else None
+    farm_alive_next_year: list[bool] | None = [] if alive_next_key is not None else None
+
+    for index, record in enumerate(copied_records):
+        if label_key not in record:
+            raise DatasetSchemaError(f"record is missing required label key '{label_key}'.")
+        if group_key not in record:
+            raise DatasetSchemaError(f"record is missing required group key '{group_key}'.")
+
+        group_id = record[group_key]
+        if isinstance(group_id, (list, tuple, set, frozenset)):
+            raise DatasetSchemaError(
+                "build_synthetic_mnar_view requires a single group id per record."
+            )
+
+        labels.append(float(record[label_key]))
+        if distressed_group_values is not None:
+            group_ids.append("distressed" if group_id in distressed_group_values else "stable")
+        else:
+            group_ids.append(str(group_id))
+        path_indices.append(int(record[path_key]) if path_key is not None else index)
+        step_indices.append(int(record[step_key]) if step_key is not None else index)
+
+        if weather_regimes is not None:
+            weather_regimes.append(str(record.get(weather_key, "normal")))
+        if farm_alive_next_year is not None:
+            farm_alive_next_year.append(bool(record.get(alive_next_key, True)))
+
+    result = apply_synthetic_mnar(
+        labels=labels,
+        group_ids=group_ids,
+        path_indices=path_indices,
+        step_indices=step_indices,
+        weather_regimes=weather_regimes,
+        farm_alive_next_year=farm_alive_next_year,
+        config=config,
+    )
+
+    transformed_rows: list[dict[str, Any]] = []
+    for index, record in enumerate(copied_records):
+        if not result.keep_mask[index]:
+            continue
+        transformed = dict(record)
+        if latent_label_key is not None:
+            transformed[latent_label_key] = record[label_key]
+        transformed[observed_key] = bool(result.observed_mask[index])
+        transformed_rows.append(transformed)
+
+    return SyntheticMNARView(rows=transformed_rows, result=result)
 
 
 class MinimaxDataCollator:
