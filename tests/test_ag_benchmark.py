@@ -29,6 +29,8 @@ class _Example:
     debt: float
     credit_limit: float
     acres: float
+    land_mortgage_balance: float
+    land_mortgage_years_remaining: int
     input_level: str
     weather_regime: str
     farm_alive_next_year: bool
@@ -50,6 +52,8 @@ def test_featurize_example_encodes_finance_action_and_weather() -> None:
             debt=100_000.0,
             credit_limit=175_000.0,
             acres=500.0,
+            land_mortgage_balance=2_000_000.0,
+            land_mortgage_years_remaining=30,
             input_level="medium",
             weather_regime="drought",
             farm_alive_next_year=False,
@@ -58,7 +62,7 @@ def test_featurize_example_encodes_finance_action_and_weather() -> None:
         action_index_by_key={("corn", "low"): 0, ("corn", "medium"): 1},
     )
 
-    assert features == [1.0, 1.0, 0.5, 0.875, 1.0, 0.3, 0.0, 1.0]
+    assert features == [1.0, 1.0, 0.5, 0.875, 1.0, 1.0, 1.0, 0.3, 0.0, 1.0]
 
 
 def test_missing_proxy_uses_group_mean_before_global_mean() -> None:
@@ -83,6 +87,8 @@ def test_build_policy_targets_supports_survival_years() -> None:
             debt=0.0,
             credit_limit=0.0,
             acres=500.0,
+            land_mortgage_balance=0.0,
+            land_mortgage_years_remaining=0,
             input_level="low",
             weather_regime="normal",
             farm_alive_next_year=True,
@@ -97,6 +103,8 @@ def test_build_policy_targets_supports_survival_years() -> None:
             debt=0.0,
             credit_limit=0.0,
             acres=500.0,
+            land_mortgage_balance=0.0,
+            land_mortgage_years_remaining=0,
             input_level="low",
             weather_regime="normal",
             farm_alive_next_year=False,
@@ -120,6 +128,8 @@ def test_build_policy_targets_supports_cumulative_profit_to_go() -> None:
             debt=0.0,
             credit_limit=0.0,
             acres=500.0,
+            land_mortgage_balance=0.0,
+            land_mortgage_years_remaining=0,
             input_level="low",
             weather_regime="normal",
             farm_alive_next_year=True,
@@ -135,6 +145,8 @@ def test_build_policy_targets_supports_cumulative_profit_to_go() -> None:
             debt=0.0,
             credit_limit=0.0,
             acres=500.0,
+            land_mortgage_balance=0.0,
+            land_mortgage_years_remaining=0,
             input_level="low",
             weather_regime="normal",
             farm_alive_next_year=False,
@@ -163,6 +175,14 @@ def test_suite_runner_invokes_requested_benchmarks(monkeypatch: pytest.MonkeyPat
             mean_observation_rate=0.5,
             mean_stable_observation_rate=0.9,
             mean_distressed_observation_rate=0.2,
+            initial_cash=300000.0,
+            initial_operating_debt=100000.0,
+            initial_credit_limit=175000.0,
+            initial_acres=500.0,
+            initial_land_value_per_acre=4000.0,
+            initial_land_mortgage_balance=1000000.0,
+            initial_land_mortgage_rate=0.045,
+            initial_land_mortgage_years=30,
             best_reference_policy_name="static_corn_medium",
             methods={},
         )
@@ -194,6 +214,14 @@ def test_format_suite_summary_includes_benchmark_headers() -> None:
                 mean_observation_rate=0.5,
                 mean_stable_observation_rate=0.9,
                 mean_distressed_observation_rate=0.2,
+                initial_cash=300000.0,
+                initial_operating_debt=100000.0,
+                initial_credit_limit=175000.0,
+                initial_acres=500.0,
+                initial_land_value_per_acre=4000.0,
+                initial_land_mortgage_balance=1000000.0,
+                initial_land_mortgage_rate=0.045,
+                initial_land_mortgage_years=30,
                 best_reference_policy_name="static_soy_medium",
                 methods={},
                 reference_policies={},
@@ -218,6 +246,14 @@ def test_format_summary_includes_reference_static_policies() -> None:
         mean_observation_rate=0.5,
         mean_stable_observation_rate=0.9,
         mean_distressed_observation_rate=0.2,
+        initial_cash=300000.0,
+        initial_operating_debt=100000.0,
+        initial_credit_limit=175000.0,
+        initial_acres=500.0,
+        initial_land_value_per_acre=4000.0,
+        initial_land_mortgage_balance=1000000.0,
+        initial_land_mortgage_rate=0.045,
+        initial_land_mortgage_years=30,
         best_reference_policy_name="static_corn_medium",
         methods={},
         reference_policies={
@@ -252,6 +288,14 @@ def test_format_summary_includes_best_static_competitor() -> None:
         mean_observation_rate=0.5,
         mean_stable_observation_rate=0.9,
         mean_distressed_observation_rate=0.2,
+        initial_cash=300000.0,
+        initial_operating_debt=100000.0,
+        initial_credit_limit=175000.0,
+        initial_acres=500.0,
+        initial_land_value_per_acre=4000.0,
+        initial_land_mortgage_balance=1000000.0,
+        initial_land_mortgage_rate=0.045,
+        initial_land_mortgage_years=30,
         best_reference_policy_name="static_corn_irrigated_high",
         methods={},
         reference_policies={},
@@ -262,6 +306,7 @@ def test_format_summary_includes_best_static_competitor() -> None:
     )
 
     assert "best static competitor: static_corn_irrigated_high" in rendered
+    assert "land finance:" in rendered
 
 
 def test_outlast_rate_counts_only_strict_survival_wins() -> None:

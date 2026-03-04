@@ -70,6 +70,10 @@ class AgricultureBenchmarkConfig:
     initial_debt: float = 100_000.0
     initial_credit_limit: float = 175_000.0
     acres: float = 500.0
+    land_value_per_acre: float = 4_000.0
+    land_financed_fraction: float = 0.5
+    land_mortgage_rate: float = 0.045
+    land_mortgage_years: int = 30
     target: str = "net_income"
     include_score_baseline: bool = True
     include_online_mnar_baseline: bool = True
@@ -175,6 +179,14 @@ class AgricultureBenchmarkSummary:
     mean_observation_rate: float
     mean_stable_observation_rate: float
     mean_distressed_observation_rate: float
+    initial_cash: float
+    initial_operating_debt: float
+    initial_credit_limit: float
+    initial_acres: float
+    initial_land_value_per_acre: float
+    initial_land_mortgage_balance: float
+    initial_land_mortgage_rate: float
+    initial_land_mortgage_years: int
     best_reference_policy_name: str | None
     methods: dict[str, AgricultureMethodSummary]
     reference_policies: dict[str, AgricultureReferencePolicySummary] = field(default_factory=dict)
@@ -263,6 +275,19 @@ class _FullObservationProcess:
         ]
 
 
+def _build_initial_state(config: AgricultureBenchmarkConfig, *, FarmState: Any) -> Any:
+    return FarmState.initial(
+        cash=config.initial_cash,
+        debt=config.initial_debt,
+        credit_limit=config.initial_credit_limit,
+        acres=config.acres,
+        land_value_per_acre=config.land_value_per_acre,
+        land_financed_fraction=config.land_financed_fraction,
+        land_mortgage_rate=config.land_mortgage_rate,
+        land_mortgage_years=config.land_mortgage_years,
+    )
+
+
 def _require_ag_survival_sim() -> dict[str, Any]:
     try:
         from ag_survival_sim import (  # type: ignore[import-not-found]
@@ -333,12 +358,7 @@ def _build_agriculture_dataset(config: AgricultureBenchmarkConfig, *, trial_inde
         ),
     )
     simulator = FarmSimulator(crop_model=_MemoizedCropModel(crop_model))
-    initial_state = FarmState.initial(
-        cash=config.initial_cash,
-        debt=config.initial_debt,
-        credit_limit=config.initial_credit_limit,
-        acres=config.acres,
-    )
+    initial_state = _build_initial_state(config, FarmState=FarmState)
     full_observation_process = _FullObservationProcess()
 
     policies = tuple(
@@ -557,6 +577,8 @@ def _featurize_fields(
     debt: float,
     credit_limit: float,
     acres: float,
+    land_mortgage_balance: float,
+    land_mortgage_years_remaining: int,
     year: int,
     action_key: tuple[str, str],
     action_index_by_key: dict[tuple[str, str], int],
@@ -573,6 +595,8 @@ def _featurize_fields(
         debt / 200_000.0,
         credit_limit / 200_000.0,
         acres / 500.0,
+        land_mortgage_balance / 2_000_000.0,
+        land_mortgage_years_remaining / 30.0,
         year / 10.0,
         *action_features,
     ]
@@ -588,6 +612,8 @@ def _featurize_example(
         debt=example.debt,
         credit_limit=example.credit_limit,
         acres=example.acres,
+        land_mortgage_balance=float(example.land_mortgage_balance),
+        land_mortgage_years_remaining=int(example.land_mortgage_years_remaining),
         year=int(example.year),
         action_key=(str(example.crop), str(example.input_level)),
         action_index_by_key=action_index_by_key,
@@ -605,6 +631,8 @@ def _featurize_decision(
         debt=state.debt,
         credit_limit=state.credit_limit,
         acres=state.acres,
+        land_mortgage_balance=float(state.land_mortgage_balance),
+        land_mortgage_years_remaining=int(state.land_mortgage_years_remaining),
         year=int(state.year),
         action_key=(str(action.crop), str(action.input_level)),
         action_index_by_key=action_index_by_key,
@@ -690,12 +718,7 @@ def _run_policy_evaluation(
         ),
     )
     simulator = FarmSimulator(crop_model=_MemoizedCropModel(crop_model))
-    initial_state = FarmState.initial(
-        cash=config.initial_cash,
-        debt=config.initial_debt,
-        credit_limit=config.initial_credit_limit,
-        acres=config.acres,
-    )
+    initial_state = _build_initial_state(config, FarmState=FarmState)
     policies = {
         method_name: _LinearPredictivePolicy(
             parameters=parameters,
@@ -969,6 +992,16 @@ def run_agriculture_benchmark(
         mean_observation_rate=mean(observation_rates),
         mean_stable_observation_rate=mean(stable_rates),
         mean_distressed_observation_rate=mean(distressed_rates),
+        initial_cash=config.initial_cash,
+        initial_operating_debt=config.initial_debt,
+        initial_credit_limit=config.initial_credit_limit,
+        initial_acres=config.acres,
+        initial_land_value_per_acre=config.land_value_per_acre,
+        initial_land_mortgage_balance=(
+            config.acres * config.land_value_per_acre * config.land_financed_fraction
+        ),
+        initial_land_mortgage_rate=config.land_mortgage_rate,
+        initial_land_mortgage_years=config.land_mortgage_years,
         best_reference_policy_name=(
             max(set(best_reference_policy_names), key=best_reference_policy_names.count)
             if best_reference_policy_names
@@ -1013,6 +1046,14 @@ def _robust_config_for_ag(
     adversary_mode: str,
     dataset_observation_rate: float | None = None,
 ) -> GradientValidationConfig:
+    assumed_observation_rate = (
+        config.assumed_observation_rate
+        if config.assumed_observation_rate is not None
+        else dataset_observation_rate
+    )
+    if assumed_observation_rate is not None:
+        assumed_observation_rate = min(max(assumed_observation_rate, config.q1.q_min), config.q1.q_max)
+
     return GradientValidationConfig(
         seed=config.seed,
         trials=1,
@@ -1020,11 +1061,7 @@ def _robust_config_for_ag(
         adversary_mode=adversary_mode,
         learning_rate=config.learning_rate,
         epochs=config.epochs,
-        assumed_observation_rate=(
-            config.assumed_observation_rate
-            if config.assumed_observation_rate is not None
-            else dataset_observation_rate
-        ),
+        assumed_observation_rate=assumed_observation_rate,
         q1=config.q1,
     )
 
@@ -1040,6 +1077,21 @@ def format_agriculture_benchmark_summary(summary: AgricultureBenchmarkSummary) -
         f"mean observation rate: {summary.mean_observation_rate:.3f}",
         f"mean stable observation rate: {summary.mean_stable_observation_rate:.3f}",
         f"mean distressed observation rate: {summary.mean_distressed_observation_rate:.3f}",
+        (
+            "initial state: "
+            f"cash={summary.initial_cash:,.0f}, "
+            f"operating_debt={summary.initial_operating_debt:,.0f}, "
+            f"credit_limit={summary.initial_credit_limit:,.0f}, "
+            f"acres={summary.initial_acres:,.0f}"
+        ),
+        (
+            "land finance: "
+            f"value_per_acre={summary.initial_land_value_per_acre:,.0f}, "
+            f"mortgage_balance={summary.initial_land_mortgage_balance:,.0f}, "
+            f"mortgage_rate={summary.initial_land_mortgage_rate:.3f}, "
+            f"mortgage_years={summary.initial_land_mortgage_years}"
+        ),
+        "all learned and static policies are evaluated from the same initial state and paired scenario paths",
         (
             f"best static competitor: {summary.best_reference_policy_name}"
             if summary.best_reference_policy_name
@@ -1167,6 +1219,26 @@ def parse_args(argv: list[str] | None = None) -> AgricultureBenchmarkConfig:
     )
     parser.add_argument("--acres", type=float, default=AgricultureBenchmarkConfig.acres)
     parser.add_argument(
+        "--land-value-per-acre",
+        type=float,
+        default=AgricultureBenchmarkConfig.land_value_per_acre,
+    )
+    parser.add_argument(
+        "--land-financed-fraction",
+        type=float,
+        default=AgricultureBenchmarkConfig.land_financed_fraction,
+    )
+    parser.add_argument(
+        "--land-mortgage-rate",
+        type=float,
+        default=AgricultureBenchmarkConfig.land_mortgage_rate,
+    )
+    parser.add_argument(
+        "--land-mortgage-years",
+        type=int,
+        default=AgricultureBenchmarkConfig.land_mortgage_years,
+    )
+    parser.add_argument(
         "--target",
         choices=["yield", "net_income", "survival_years", "cumulative_profit_to_go"],
         default=AgricultureBenchmarkConfig.target,
@@ -1212,6 +1284,10 @@ def parse_args(argv: list[str] | None = None) -> AgricultureBenchmarkConfig:
         initial_debt=args.debt,
         initial_credit_limit=args.credit_limit,
         acres=args.acres,
+        land_value_per_acre=args.land_value_per_acre,
+        land_financed_fraction=args.land_financed_fraction,
+        land_mortgage_rate=args.land_mortgage_rate,
+        land_mortgage_years=args.land_mortgage_years,
         target=args.target,
         include_score_baseline=not args.exclude_score_baseline,
         include_online_mnar_baseline=not args.exclude_online_mnar_baseline,

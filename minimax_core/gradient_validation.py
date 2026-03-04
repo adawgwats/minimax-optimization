@@ -431,8 +431,11 @@ def train_robust_group(dataset: LinearDataset, config: GradientValidationConfig)
             group_ids=dataset.train_group_ids,
             observed_mask=dataset.train_observed_mask,
         )
+        clipped_observation_rate = _clip_observation_rate(snapshot.observation_rate, config)
         if config.online_mnar:
             snapshot = replace(snapshot, observation_rate=assumed_observation_rate)
+        else:
+            snapshot = replace(snapshot, observation_rate=clipped_observation_rate)
         q_values = adversary.update(snapshot)
         weights = compute_example_weights(
             snapshot,
