@@ -74,6 +74,7 @@ class AgricultureBenchmarkConfig:
     land_financed_fraction: float = 0.5
     land_mortgage_rate: float = 0.045
     land_mortgage_years: int = 30
+    land_mortgage_grace_years: int = 2
     target: str = "net_income"
     include_score_baseline: bool = True
     include_online_mnar_baseline: bool = True
@@ -94,6 +95,8 @@ class AgricultureBenchmarkConfig:
             raise ValueError("learning_rate must be positive.")
         if self.epochs <= 0:
             raise ValueError("epochs must be positive.")
+        if self.land_mortgage_grace_years < 0:
+            raise ValueError("land_mortgage_grace_years must be nonnegative.")
         if self.target not in {"yield", "net_income", "survival_years", "cumulative_profit_to_go"}:
             raise ValueError(
                 "target must be 'yield', 'net_income', 'survival_years', or 'cumulative_profit_to_go'."
@@ -187,9 +190,21 @@ class AgricultureBenchmarkSummary:
     initial_land_mortgage_balance: float
     initial_land_mortgage_rate: float
     initial_land_mortgage_years: int
+    initial_land_mortgage_grace_years: int
     best_reference_policy_name: str | None
     methods: dict[str, AgricultureMethodSummary]
     reference_policies: dict[str, AgricultureReferencePolicySummary] = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
+class AgricultureDecisionTraceSummary:
+    benchmark_name: str
+    target: str
+    output_path: str
+    path_index: int
+    plotted_policies: tuple[str, ...]
+    best_reference_policy_name: str | None
+    plot_kind: str
 
 
 @dataclass(frozen=True)
@@ -285,6 +300,7 @@ def _build_initial_state(config: AgricultureBenchmarkConfig, *, FarmState: Any) 
         land_financed_fraction=config.land_financed_fraction,
         land_mortgage_rate=config.land_mortgage_rate,
         land_mortgage_years=config.land_mortgage_years,
+        land_mortgage_grace_years=config.land_mortgage_grace_years,
     )
 
 
@@ -301,6 +317,8 @@ def _require_ag_survival_sim() -> dict[str, Any]:
             get_benchmark_definition,
             list_benchmark_definitions,
             planned_operating_cost,
+            plot_policy_action_traces,
+            plot_policy_profit_traces,
         )
         from ag_survival_sim.simulator import FarmSimulator  # type: ignore[import-not-found]
     except ImportError as error:
@@ -322,6 +340,8 @@ def _require_ag_survival_sim() -> dict[str, Any]:
         "get_benchmark_definition": get_benchmark_definition,
         "list_benchmark_definitions": list_benchmark_definitions,
         "planned_operating_cost": planned_operating_cost,
+        "plot_policy_action_traces": plot_policy_action_traces,
+        "plot_policy_profit_traces": plot_policy_profit_traces,
     }
 
 
@@ -579,6 +599,7 @@ def _featurize_fields(
     acres: float,
     land_mortgage_balance: float,
     land_mortgage_years_remaining: int,
+    land_mortgage_grace_years_remaining: int,
     year: int,
     action_key: tuple[str, str],
     action_index_by_key: dict[tuple[str, str], int],
@@ -597,6 +618,7 @@ def _featurize_fields(
         acres / 500.0,
         land_mortgage_balance / 2_000_000.0,
         land_mortgage_years_remaining / 30.0,
+        land_mortgage_grace_years_remaining / 2.0,
         year / 10.0,
         *action_features,
     ]
@@ -614,6 +636,7 @@ def _featurize_example(
         acres=example.acres,
         land_mortgage_balance=float(example.land_mortgage_balance),
         land_mortgage_years_remaining=int(example.land_mortgage_years_remaining),
+        land_mortgage_grace_years_remaining=int(example.land_mortgage_grace_years_remaining),
         year=int(example.year),
         action_key=(str(example.crop), str(example.input_level)),
         action_index_by_key=action_index_by_key,
@@ -633,6 +656,7 @@ def _featurize_decision(
         acres=state.acres,
         land_mortgage_balance=float(state.land_mortgage_balance),
         land_mortgage_years_remaining=int(state.land_mortgage_years_remaining),
+        land_mortgage_grace_years_remaining=int(state.land_mortgage_grace_years_remaining),
         year=int(state.year),
         action_key=(str(action.crop), str(action.input_level)),
         action_index_by_key=action_index_by_key,
@@ -802,6 +826,140 @@ def _collect_action_counts(policy_evaluation: Any) -> dict[str, int]:
     return counts
 
 
+def _train_agriculture_methods(
+    config: AgricultureBenchmarkConfig,
+    *,
+    dataset: AgricultureDataset,
+) -> dict[str, list[float]]:
+    baseline_config = _baseline_config_for_ag(config)
+    robust_group_config = _robust_config_for_ag(
+        config,
+        adversary_mode="group",
+        dataset_observation_rate=dataset.observation_rate,
+    )
+    robust_score_config = _robust_config_for_ag(config, adversary_mode="score")
+    robust_time_varying_config = _robust_config_for_ag(config, adversary_mode="time_varying")
+    robust_knightian_config = _robust_config_for_ag(config, adversary_mode="knightian")
+    robust_surprise_config = _robust_config_for_ag(config, adversary_mode="surprise")
+
+    method_parameters: dict[str, list[float]] = {
+        "erm": train_erm_baseline(dataset.linear, baseline_config),
+        "group_balanced": train_group_balanced_baseline(dataset.linear, baseline_config),
+        "group_prior": train_group_prior_baseline(dataset.linear, baseline_config),
+        "focal": train_focal_baseline(dataset.linear, baseline_config),
+        "group_dro": train_group_dro_baseline(dataset.linear, baseline_config),
+        "robust_group": train_robust_group(dataset.linear, robust_group_config),
+        "oracle": train_oracle_baseline(dataset.linear, baseline_config),
+    }
+    if config.include_online_mnar_baseline:
+        method_parameters["robust_group_online"] = train_robust_group_online(
+            dataset.linear,
+            robust_group_config,
+        )
+    if config.include_score_baseline:
+        method_parameters["robust_score"] = train_robust_score(
+            dataset.linear,
+            robust_score_config,
+        )
+    if config.include_time_varying_baseline:
+        method_parameters["robust_time_varying"] = train_robust_time_varying(
+            dataset.linear,
+            robust_time_varying_config,
+        )
+    if config.include_knightian_baseline:
+        method_parameters["robust_knightian"] = train_robust_knightian(
+            dataset.linear,
+            robust_knightian_config,
+        )
+    if config.include_surprise_baseline:
+        method_parameters["robust_surprise"] = train_robust_surprise(
+            dataset.linear,
+            robust_surprise_config,
+        )
+    return method_parameters
+
+
+def run_agriculture_decision_trace(
+    config: AgricultureBenchmarkConfig,
+    *,
+    output_path: str = "outputs/ag_decision_trace.png",
+    path_index: int = 0,
+    trial_index: int = 0,
+    method_names: list[str] | tuple[str, ...] | None = None,
+    include_best_reference: bool = True,
+    plot_kind: str = "profit",
+    show_plot: bool = False,
+) -> AgricultureDecisionTraceSummary:
+    ag = _require_ag_survival_sim()
+    plot_policy_action_traces = ag["plot_policy_action_traces"]
+    plot_policy_profit_traces = ag["plot_policy_profit_traces"]
+
+    dataset = _build_agriculture_dataset(config, trial_index=trial_index)
+    method_parameters = _train_agriculture_methods(config, dataset=dataset)
+    learned_summary, reference_summary = _run_policy_evaluation(
+        config,
+        trial_index=trial_index,
+        dataset=dataset,
+        method_parameters=method_parameters,
+    )
+    best_reference_policy_name = _select_best_reference_policy_name(reference_summary)
+
+    selected_method_names = list(method_names or ["erm", "robust_group", "robust_group_online", "focal"])
+    selected_evaluations: dict[str, Any] = {}
+    for method_name in selected_method_names:
+        if method_name in learned_summary.evaluations:
+            selected_evaluations[method_name] = learned_summary.evaluations[method_name]
+    if include_best_reference and best_reference_policy_name:
+        selected_evaluations[best_reference_policy_name] = reference_summary.evaluations[best_reference_policy_name]
+    if not selected_evaluations:
+        raise ValueError("No matching policy evaluations were available for the requested trace.")
+
+    subtitle_lines = [
+        f"benchmark={config.benchmark_name}, target={config.target}, mnar={config.mnar_mode}",
+        (
+            "initial state: "
+            f"cash={config.initial_cash:,.0f}, debt={config.initial_debt:,.0f}, "
+            f"credit_limit={config.initial_credit_limit:,.0f}, acres={config.acres:,.0f}"
+        ),
+        (
+            "land finance: "
+            f"mortgage_balance={config.acres * config.land_value_per_acre * config.land_financed_fraction:,.0f}, "
+            f"mortgage_rate={config.land_mortgage_rate:.3f}, "
+            f"mortgage_years={config.land_mortgage_years}, "
+            f"grace_years={config.land_mortgage_grace_years}"
+        ),
+    ]
+    if plot_kind == "action":
+        plot_policy_action_traces(
+            policy_evaluations=selected_evaluations,
+            path_index=path_index,
+            output_path=output_path,
+            title=f"agriculture policy action trace (trial {trial_index}, path {path_index})",
+            subtitle_lines=subtitle_lines,
+            show=show_plot,
+        )
+    elif plot_kind == "profit":
+        plot_policy_profit_traces(
+            policy_evaluations=selected_evaluations,
+            path_index=path_index,
+            output_path=output_path,
+            title=f"agriculture policy cumulative profit trace (trial {trial_index}, path {path_index})",
+            subtitle_lines=subtitle_lines,
+            show=show_plot,
+        )
+    else:
+        raise ValueError("plot_kind must be 'profit' or 'action'.")
+    return AgricultureDecisionTraceSummary(
+        benchmark_name=config.benchmark_name,
+        target=config.target,
+        output_path=output_path,
+        path_index=path_index,
+        plotted_policies=tuple(selected_evaluations),
+        best_reference_policy_name=best_reference_policy_name,
+        plot_kind=plot_kind,
+    )
+
+
 def run_agriculture_benchmark(
     config: AgricultureBenchmarkConfig,
 ) -> tuple[list[dict[str, AgricultureMethodMetrics]], AgricultureBenchmarkSummary]:
@@ -825,51 +983,7 @@ def run_agriculture_benchmark(
         stable_rates.append(dataset.stable_observation_rate)
         distressed_rates.append(dataset.distressed_observation_rate)
 
-        baseline_config = _baseline_config_for_ag(config)
-        robust_group_config = _robust_config_for_ag(
-            config,
-            adversary_mode="group",
-            dataset_observation_rate=dataset.observation_rate,
-        )
-        robust_score_config = _robust_config_for_ag(config, adversary_mode="score")
-        robust_time_varying_config = _robust_config_for_ag(config, adversary_mode="time_varying")
-        robust_knightian_config = _robust_config_for_ag(config, adversary_mode="knightian")
-        robust_surprise_config = _robust_config_for_ag(config, adversary_mode="surprise")
-
-        method_parameters: dict[str, list[float]] = {
-            "erm": train_erm_baseline(dataset.linear, baseline_config),
-            "group_balanced": train_group_balanced_baseline(dataset.linear, baseline_config),
-            "group_prior": train_group_prior_baseline(dataset.linear, baseline_config),
-            "focal": train_focal_baseline(dataset.linear, baseline_config),
-            "group_dro": train_group_dro_baseline(dataset.linear, baseline_config),
-            "robust_group": train_robust_group(dataset.linear, robust_group_config),
-            "oracle": train_oracle_baseline(dataset.linear, baseline_config),
-        }
-        if config.include_online_mnar_baseline:
-            method_parameters["robust_group_online"] = train_robust_group_online(
-                dataset.linear,
-                robust_group_config,
-            )
-        if config.include_score_baseline:
-            method_parameters["robust_score"] = train_robust_score(
-                dataset.linear,
-                robust_score_config,
-            )
-        if config.include_time_varying_baseline:
-            method_parameters["robust_time_varying"] = train_robust_time_varying(
-                dataset.linear,
-                robust_time_varying_config,
-            )
-        if config.include_knightian_baseline:
-            method_parameters["robust_knightian"] = train_robust_knightian(
-                dataset.linear,
-                robust_knightian_config,
-            )
-        if config.include_surprise_baseline:
-            method_parameters["robust_surprise"] = train_robust_surprise(
-                dataset.linear,
-                robust_surprise_config,
-            )
+        method_parameters = _train_agriculture_methods(config, dataset=dataset)
 
         learned_summary, reference_summary = _run_policy_evaluation(
             config,
@@ -1002,6 +1116,7 @@ def run_agriculture_benchmark(
         ),
         initial_land_mortgage_rate=config.land_mortgage_rate,
         initial_land_mortgage_years=config.land_mortgage_years,
+        initial_land_mortgage_grace_years=config.land_mortgage_grace_years,
         best_reference_policy_name=(
             max(set(best_reference_policy_names), key=best_reference_policy_names.count)
             if best_reference_policy_names
@@ -1089,7 +1204,8 @@ def format_agriculture_benchmark_summary(summary: AgricultureBenchmarkSummary) -
             f"value_per_acre={summary.initial_land_value_per_acre:,.0f}, "
             f"mortgage_balance={summary.initial_land_mortgage_balance:,.0f}, "
             f"mortgage_rate={summary.initial_land_mortgage_rate:.3f}, "
-            f"mortgage_years={summary.initial_land_mortgage_years}"
+            f"mortgage_years={summary.initial_land_mortgage_years}, "
+            f"grace_years={summary.initial_land_mortgage_grace_years}"
         ),
         "all learned and static policies are evaluated from the same initial state and paired scenario paths",
         (
@@ -1192,10 +1308,7 @@ def format_agriculture_benchmark_suite_summary(
     return "\n".join(lines)
 
 
-def parse_args(argv: list[str] | None = None) -> AgricultureBenchmarkConfig:
-    parser = argparse.ArgumentParser(
-        description="Run a DSSAT-backed agriculture benchmark against minimax baselines."
-    )
+def _add_common_ag_benchmark_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--benchmark",
         choices=_available_benchmark_names(),
@@ -1239,6 +1352,11 @@ def parse_args(argv: list[str] | None = None) -> AgricultureBenchmarkConfig:
         default=AgricultureBenchmarkConfig.land_mortgage_years,
     )
     parser.add_argument(
+        "--land-mortgage-grace-years",
+        type=int,
+        default=AgricultureBenchmarkConfig.land_mortgage_grace_years,
+    )
+    parser.add_argument(
         "--target",
         choices=["yield", "net_income", "survival_years", "cumulative_profit_to_go"],
         default=AgricultureBenchmarkConfig.target,
@@ -1261,11 +1379,12 @@ def parse_args(argv: list[str] | None = None) -> AgricultureBenchmarkConfig:
     parser.add_argument("--exclude-knightian-baseline", action="store_true")
     parser.add_argument("--exclude-surprise-baseline", action="store_true")
     parser.add_argument("--assumed-observation-rate", type=float, default=None)
-    parser.add_argument("--all-benchmarks", action="store_true")
-    args = parser.parse_args(argv)
+
+
+def _config_from_namespace(args: argparse.Namespace) -> AgricultureBenchmarkConfig:
     return AgricultureBenchmarkConfig(
         benchmark_name=args.benchmark,
-        all_benchmarks=args.all_benchmarks,
+        all_benchmarks=getattr(args, "all_benchmarks", False),
         seed=args.seed,
         trials=args.trials,
         train_paths=args.train_paths,
@@ -1288,6 +1407,7 @@ def parse_args(argv: list[str] | None = None) -> AgricultureBenchmarkConfig:
         land_financed_fraction=args.land_financed_fraction,
         land_mortgage_rate=args.land_mortgage_rate,
         land_mortgage_years=args.land_mortgage_years,
+        land_mortgage_grace_years=args.land_mortgage_grace_years,
         target=args.target,
         include_score_baseline=not args.exclude_score_baseline,
         include_online_mnar_baseline=not args.exclude_online_mnar_baseline,
@@ -1300,6 +1420,52 @@ def parse_args(argv: list[str] | None = None) -> AgricultureBenchmarkConfig:
             q_max=args.q_max,
             adversary_step_size=args.adversary_step_size,
         ),
+    )
+
+
+def parse_args(argv: list[str] | None = None) -> AgricultureBenchmarkConfig:
+    parser = argparse.ArgumentParser(
+        description="Run a DSSAT-backed agriculture benchmark against minimax baselines."
+    )
+    _add_common_ag_benchmark_args(parser)
+    parser.add_argument("--all-benchmarks", action="store_true")
+    args = parser.parse_args(argv)
+    return _config_from_namespace(args)
+
+
+def trace_main(argv: list[str] | None = None) -> None:
+    parser = argparse.ArgumentParser(
+        description="Plot per-step action traces for learned agriculture benchmark policies."
+    )
+    _add_common_ag_benchmark_args(parser)
+    parser.add_argument("--output-path", type=str, default="outputs/ag_decision_trace.png")
+    parser.add_argument("--path-index", type=int, default=0)
+    parser.add_argument("--trial-index", type=int, default=0)
+    parser.add_argument("--plot-kind", choices=["profit", "action"], default="profit")
+    parser.add_argument("--show-plot", action="store_true")
+    parser.add_argument(
+        "--method",
+        dest="methods",
+        action="append",
+        default=None,
+        help="Method to include in the trace. Repeat to plot multiple learned policies.",
+    )
+    parser.add_argument("--exclude-best-static-reference", action="store_true")
+    args = parser.parse_args(argv)
+
+    trace_summary = run_agriculture_decision_trace(
+        _config_from_namespace(args),
+        output_path=args.output_path,
+        path_index=args.path_index,
+        trial_index=args.trial_index,
+        method_names=args.methods,
+        include_best_reference=not args.exclude_best_static_reference,
+        plot_kind=args.plot_kind,
+        show_plot=args.show_plot,
+    )
+    print(
+        f"wrote {trace_summary.plot_kind} trace plot to "
+        f"{trace_summary.output_path} for policies: {', '.join(trace_summary.plotted_policies)}"
     )
 
 

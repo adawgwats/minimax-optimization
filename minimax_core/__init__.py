@@ -44,6 +44,7 @@ from .uncertainty import (
 
 __all__ = [
     "AgricultureBenchmarkConfig",
+    "AgricultureDecisionTraceSummary",
     "AgricultureReferencePolicySummary",
     "AgricultureBenchmarkSummary",
     "AgricultureBenchmarkSuiteSummary",
@@ -89,6 +90,7 @@ __all__ = [
     "estimate_group_snapshot",
     "format_agriculture_benchmark_summary",
     "format_agriculture_benchmark_suite_summary",
+    "run_agriculture_decision_trace",
     "normalized_group_weights",
     "observed_empirical_risk",
     "robust_risk",
@@ -113,6 +115,7 @@ __all__ = [
 def __getattr__(name: str):
     if name in {
         "AgricultureBenchmarkConfig",
+        "AgricultureDecisionTraceSummary",
         "AgricultureReferencePolicySummary",
         "AgricultureBenchmarkSummary",
         "AgricultureBenchmarkSuiteSummary",
@@ -128,6 +131,7 @@ def __getattr__(name: str):
         "format_agriculture_benchmark_summary",
         "format_agriculture_benchmark_suite_summary",
         "run_agriculture_benchmark",
+        "run_agriculture_decision_trace",
         "run_agriculture_benchmark_suite",
         "run_baseline_comparison",
         "run_baseline_comparison_suite",
@@ -143,12 +147,14 @@ def __getattr__(name: str):
     }:
         from .ag_benchmark import (
             AgricultureBenchmarkConfig,
+            AgricultureDecisionTraceSummary,
             AgricultureReferencePolicySummary,
             AgricultureBenchmarkSummary,
             AgricultureBenchmarkSuiteSummary,
             format_agriculture_benchmark_summary,
             format_agriculture_benchmark_suite_summary,
             run_agriculture_benchmark,
+            run_agriculture_decision_trace,
             run_agriculture_benchmark_suite,
         )
         from .comparison import (
@@ -180,6 +186,7 @@ def __getattr__(name: str):
 
         mapping = {
             "AgricultureBenchmarkConfig": AgricultureBenchmarkConfig,
+            "AgricultureDecisionTraceSummary": AgricultureDecisionTraceSummary,
             "AgricultureReferencePolicySummary": AgricultureReferencePolicySummary,
             "AgricultureBenchmarkSummary": AgricultureBenchmarkSummary,
             "AgricultureBenchmarkSuiteSummary": AgricultureBenchmarkSuiteSummary,
@@ -193,6 +200,7 @@ def __getattr__(name: str):
             "MonteCarloConfig": MonteCarloConfig,
             "MonteCarloSummary": MonteCarloSummary,
             "run_agriculture_benchmark": run_agriculture_benchmark,
+            "run_agriculture_decision_trace": run_agriculture_decision_trace,
             "run_agriculture_benchmark_suite": run_agriculture_benchmark_suite,
             "ScenarioComparisonSummary": ScenarioComparisonSummary,
             "TrialResult": TrialResult,
