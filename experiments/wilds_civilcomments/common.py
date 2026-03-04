@@ -34,6 +34,8 @@ class CivilCommentsExperimentConfig:
     num_train_epochs: int = 3
     seed: int = 17
     download: bool = True
+    save_strategy: str = "epoch"
+    save_final_checkpoint: bool = True
     train_fraction: float = 1.0
     val_fraction: float = 1.0
     test_fraction: float = 1.0
@@ -41,6 +43,7 @@ class CivilCommentsExperimentConfig:
     max_val_examples: int | None = None
     max_test_examples: int | None = None
     explicit_mnar: bool = False
+    assumed_observation_rate: float | None = None
     base_observation_rate: float = 0.95
     toxic_penalty: float = 0.20
     identity_penalty: float = 0.10
@@ -48,8 +51,8 @@ class CivilCommentsExperimentConfig:
     min_observation_rate: float = 0.05
 
     def __post_init__(self) -> None:
-        if self.method not in {"erm", "robust_group"}:
-            raise ValueError("method must be one of {'erm', 'robust_group'}.")
+        if self.method not in {"erm", "robust_group", "robust_auto_v1"}:
+            raise ValueError("method must be one of {'erm', 'robust_group', 'robust_auto_v1'}.")
         if self.max_length <= 0:
             raise ValueError("max_length must be positive.")
         if self.train_batch_size <= 0 or self.eval_batch_size <= 0:
@@ -60,6 +63,8 @@ class CivilCommentsExperimentConfig:
             raise ValueError("weight_decay must be non-negative.")
         if self.num_train_epochs <= 0:
             raise ValueError("num_train_epochs must be positive.")
+        if self.save_strategy not in {"no", "epoch"}:
+            raise ValueError("save_strategy must be one of {'no', 'epoch'}.")
         for name, value in (
             ("train_fraction", self.train_fraction),
             ("val_fraction", self.val_fraction),
@@ -80,6 +85,8 @@ class CivilCommentsExperimentConfig:
             raise ValueError("min_observation_rate must be in (0, 1].")
         if self.min_observation_rate > self.base_observation_rate:
             raise ValueError("min_observation_rate cannot exceed base_observation_rate.")
+        if self.assumed_observation_rate is not None and not 0.0 < self.assumed_observation_rate <= 1.0:
+            raise ValueError("assumed_observation_rate must be in (0, 1].")
         for name, value in (
             ("toxic_penalty", self.toxic_penalty),
             ("identity_penalty", self.identity_penalty),
@@ -109,6 +116,9 @@ def load_experiment_config(path: str | Path) -> CivilCommentsExperimentConfig:
         data = {}
     if not isinstance(data, Mapping):
         raise ValueError("experiment config must deserialize to a mapping.")
+    data = dict(data)
+    if data.get("save_strategy") is False:
+        data["save_strategy"] = "no"
     return CivilCommentsExperimentConfig(**data)
 
 
@@ -187,6 +197,20 @@ def build_observed_mask(
     ]
     _ensure_group_coverage(observed_mask, memberships)
     return observed_mask
+
+
+def estimate_latent_observation_rate(
+    metadata_rows: Sequence[Sequence[Any] | Mapping[str, Any]],
+    metadata_fields: Sequence[str],
+    config: CivilCommentsExperimentConfig,
+) -> float:
+    if not metadata_rows:
+        return 1.0
+    probabilities = [
+        synthetic_observation_probability(metadata_row, metadata_fields, config)
+        for metadata_row in metadata_rows
+    ]
+    return sum(probabilities) / len(probabilities)
 
 
 def summarize_memberships(

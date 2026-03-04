@@ -149,3 +149,33 @@ def test_load_experiment_config_supports_json(tmp_path) -> None:
         explicit_mnar=True,
         seed=19,
     )
+
+
+def test_load_experiment_config_coerces_yaml_no_save_strategy(tmp_path) -> None:
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text("save_strategy: no\nsave_final_checkpoint: false\n", encoding="utf-8")
+
+    config = load_experiment_config(config_path)
+
+    assert config.save_strategy == "no"
+    assert config.save_final_checkpoint is False
+
+
+def test_experiment_config_accepts_no_save_strategy() -> None:
+    config = CivilCommentsExperimentConfig(
+        save_strategy="no",
+        save_final_checkpoint=False,
+    )
+
+    assert config.save_strategy == "no"
+    assert config.save_final_checkpoint is False
+
+
+def test_experiment_config_accepts_auto_discovery_method_and_assumed_rate() -> None:
+    config = CivilCommentsExperimentConfig(
+        method="robust_auto_v1",
+        assumed_observation_rate=0.7,
+    )
+
+    assert config.method == "robust_auto_v1"
+    assert config.assumed_observation_rate == 0.7

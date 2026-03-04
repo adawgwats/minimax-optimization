@@ -12,6 +12,7 @@ if __package__ is None or __package__ == "":
 from experiments.wilds_civilcomments.common import CivilCommentsExperimentConfig, load_experiment_config
 from experiments.wilds_civilcomments.dataset import TrainerDependencyError, load_civilcomments_splits
 from experiments.wilds_civilcomments.metrics import (
+    compute_civilcomments_wilds_eval,
     compute_civilcomments_metrics,
     format_split_metrics,
     logits_to_predictions_and_scores,
@@ -81,7 +82,14 @@ def evaluate_checkpoint(
             )
             payload["wilds_eval"] = _normalize_wilds_results(wilds_results)
         except Exception as error:  # pragma: no cover - defensive path around optional deps
+            payload["wilds_eval"] = compute_civilcomments_wilds_eval(
+                labels=split.labels,
+                predicted_labels=predicted_labels,
+                metadata_rows=split.metadata_rows,
+                metadata_fields=split.metadata_fields,
+            )
             payload["wilds_eval_error"] = str(error)
+            payload["wilds_eval_source"] = "fallback"
     return payload, metrics
 
 

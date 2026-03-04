@@ -19,6 +19,52 @@ class CivilCommentsSplitMetrics:
     group_auroc_counts: dict[str, int]
 
 
+def compute_civilcomments_wilds_eval(
+    labels: Sequence[int],
+    predicted_labels: Sequence[int],
+    metadata_rows: Sequence[Sequence[Any] | Mapping[str, Any]],
+    metadata_fields: Sequence[str],
+) -> dict[str, float]:
+    if not (len(labels) == len(predicted_labels) == len(metadata_rows)):
+        raise ValueError("labels, predicted_labels, and metadata_rows must align.")
+    if not labels:
+        raise ValueError("at least one evaluation example is required.")
+
+    label_ints = [int(label) for label in labels]
+    pred_ints = [int(label) for label in predicted_labels]
+    metadata_dicts = [
+        metadata_row_to_dict(metadata_row, metadata_fields)
+        for metadata_row in metadata_rows
+    ]
+
+    results: dict[str, float] = {
+        "acc_avg": _accuracy(label_ints, pred_ints),
+    }
+    worst_group_accuracy: float | None = None
+    for identity in IDENTITY_FIELDS:
+        for label_value in (0, 1):
+            indices = [
+                index
+                for index, metadata in enumerate(metadata_dicts)
+                if metadata.get(identity, 0) == 1 and label_ints[index] == label_value
+            ]
+            group_name = f"{identity}:1,y:{label_value}"
+            if indices:
+                group_accuracy = _accuracy(
+                    [label_ints[index] for index in indices],
+                    [pred_ints[index] for index in indices],
+                )
+                results[f"acc_{group_name}"] = group_accuracy
+                results[f"count_{group_name}"] = float(len(indices))
+                if worst_group_accuracy is None or group_accuracy < worst_group_accuracy:
+                    worst_group_accuracy = group_accuracy
+            else:
+                results[f"acc_{group_name}"] = 0.0
+                results[f"count_{group_name}"] = 0.0
+    results["acc_wg"] = 0.0 if worst_group_accuracy is None else worst_group_accuracy
+    return results
+
+
 def logits_to_predictions_and_scores(
     logits: Sequence[Sequence[float]] | Sequence[float],
 ) -> tuple[list[int], list[float]]:

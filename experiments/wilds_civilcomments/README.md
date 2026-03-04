@@ -8,12 +8,14 @@ Current scope:
 - explicit MNAR masking utilities are available for the `train` split
 - configuration files are tracked alongside the experiment
 - `train.py` and `eval.py` provide the first runnable CivilComments experiment entrypoints
+- training configs can disable checkpoint writes with `save_strategy: "no"` and `save_final_checkpoint: false`
 
 The intended experiment tracks are:
 
 - `vanilla`: original WILDS supervision
 - `explicit_mnar`: shared synthetic MNAR masking on the training split
 - `latent_mnar`: unchanged training data with an internal latent-missingness adversary
+- `adaptive_v1`: versioned auto-discovery ambiguity updates from the score stream, without custom dataset metadata
 
 Install dependencies with:
 
@@ -26,6 +28,7 @@ Run training with:
 ```bash
 python experiments/wilds_civilcomments/train.py --config experiments/wilds_civilcomments/configs/base_erm.yaml
 python experiments/wilds_civilcomments/train.py --config experiments/wilds_civilcomments/configs/robust_group.yaml
+python experiments/wilds_civilcomments/train.py --config experiments/wilds_civilcomments/configs/pilot_auto_v1.yaml
 ```
 
 Evaluate a saved checkpoint with:

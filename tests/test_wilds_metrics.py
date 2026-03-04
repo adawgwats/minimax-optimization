@@ -1,5 +1,6 @@
 from experiments.wilds_civilcomments.metrics import (
     binary_auroc,
+    compute_civilcomments_wilds_eval,
     compute_civilcomments_metrics,
     format_split_metrics,
     logits_to_predictions_and_scores,
@@ -73,6 +74,27 @@ def test_compute_civilcomments_metrics_tracks_worst_group_accuracy_and_auroc() -
     assert metrics.worst_group_accuracy == 0.0
     assert metrics.group_auroc["female"] == 1.0
     assert metrics.worst_group_auroc == 1.0
+
+
+def test_compute_civilcomments_wilds_eval_matches_accuracy_view() -> None:
+    metadata_rows = [
+        [0, 1, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0],
+        [0, 1, 0, 0, 0, 0, 1, 0, 1, 0, 0, 0, 0, 0, 0, 1],
+        [0, 0, 0, 0, 0, 0, 1, 0, 1, 0, 0, 0, 0, 0, 0, 1],
+        [1, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0],
+    ]
+
+    results = compute_civilcomments_wilds_eval(
+        labels=[0, 1, 1, 0],
+        predicted_labels=[0, 0, 1, 1],
+        metadata_rows=metadata_rows,
+        metadata_fields=METADATA_FIELDS,
+    )
+
+    assert results["acc_avg"] == 0.5
+    assert results["acc_wg"] == 0.0
+    assert results["acc_female:1,y:0"] == 1.0
+    assert results["acc_female:1,y:1"] == 0.0
 
 
 def test_format_split_metrics_renders_compact_summary() -> None:

@@ -65,6 +65,22 @@ trainer = MinimaxTrainer(
 )
 ```
 
+When users do not have task-specific Knightian metadata but still want a versioned auto-discovery ambiguity controller, use `adaptive_v1` with an assumed observation-rate prior:
+
+```python
+trainer = MinimaxTrainer(
+    model=model,
+    args=training_args,
+    train_dataset=train_dataset,
+    eval_dataset=eval_dataset,
+    minimax_config=MinimaxHFConfig(
+        group_key="group_id",
+        uncertainty_mode="adaptive_v1",
+        assumed_observation_rate=0.85,
+    ),
+)
+```
+
 ## What the adapter does for you
 
 - wraps the active HF data collator so `group_id` and `label_observed` survive batching
@@ -118,9 +134,11 @@ If `label_observed` is omitted, the trainer assumes all labels are observed.
 
 ## Current scope
 
-`v0` implements one adversary family:
+`v0` still centers on selective-observation robustness, but the HF surface now exposes both explicit-metadata and auto-discovery variants:
 
-- selective observation / non-ignorable missingness
+- grouped selective observation / non-ignorable missingness
+- score-based ambiguity from per-example losses
+- `adaptive_v1`, a versioned auto-discovery controller that derives time/history-like ambiguity signals online from the score stream
 
 The long-term architecture is broader, but the current implemented HF method is intentionally narrow.
 
@@ -134,8 +152,9 @@ Available set families:
 - `ScoreBasedObservationSet`: per-example observation ambiguity from proxy scores
 - `TimeVaryingObservationSet`: a time-indexed extension where later observations can be given a different ambiguity budget than earlier ones
 - `KnightianObservationSet`: a history-aware extension where ambiguity can grow with both time and accumulated hidden/distress history
+- `SurpriseDrivenObservationSet`: a surprise-aware extension that can amplify ambiguity after unexpected residual shocks
 
-The grouped and score adversaries currently drive the main benchmarks. The time-varying and Knightian sets are the first package-level seams for dynamic ambiguity over observation, which is the closest bridge to a Christensen-plus-Knightian extension in sequential settings.
+The grouped and score adversaries currently drive the main benchmarks. The time-varying, Knightian, and surprise-aware sets are the package-level seams for dynamic ambiguity over observation. `adaptive_v1` in the HF adapter uses those same ideas without requiring downstream users to supply custom time/history metadata.
 
 The DSSAT benchmark also now includes a `robust_time_varying` baseline. It uses per-example time indices to let later observations carry a different ambiguity budget than earlier ones, which is useful when selection bias compounds over time.
 
