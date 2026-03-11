@@ -40,6 +40,15 @@ python experiments/wilds_civilcomments/multiseed.py --config experiments/wilds_c
 
 Each sweep writes a `multiseed_summary.json` artifact under `<config.output_dir>_multiseed/`.
 
+Each `metrics.json` now also includes deployment-style robustness fields:
+
+- `val.operating_point` and `test.operating_point`
+- threshold selected on validation at target recall (`0.90` by default)
+- thresholded precision/recall/FPR/FNR plus worst-group FNR
+- `test.stress_curve` and `test.stress_summary`
+- hidden-risk stress sweep over severity levels (`0.0` to `0.6`)
+- AURC and failure-rate summaries for tail worst-group accuracy
+
 Run exploratory unlabeled self-training (teacher -> pseudo-label -> student) with:
 
 ```bash

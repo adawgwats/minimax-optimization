@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import math
 from typing import Any, Sequence
 
 from experiments.wilds_civilcomments.common import (
@@ -107,7 +108,7 @@ def _build_split(
     example_count = len(subset) if max_examples is None else min(len(subset), max_examples)
     for index in range(example_count):
         text, label, metadata = subset[index]
-        texts.append(text)
+        texts.append(_coerce_text(text))
         labels.append(_coerce_int(label))
         metadata_rows.append([_coerce_int(value) for value in metadata])
 
@@ -176,6 +177,25 @@ def _coerce_int(value: Any) -> int:
     if hasattr(value, "item"):
         value = value.item()
     return int(value)
+
+
+def _coerce_text(value: Any) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, str):
+        return value
+    if isinstance(value, bytes):
+        return value.decode("utf-8", errors="replace")
+    if isinstance(value, float) and math.isnan(value):
+        return ""
+    if hasattr(value, "item"):
+        value = value.item()
+        if value is None:
+            return ""
+        if isinstance(value, float) and math.isnan(value):
+            return ""
+        return str(value)
+    return str(value)
 
 
 def _split_fraction(config: CivilCommentsExperimentConfig, split_name: str) -> float:

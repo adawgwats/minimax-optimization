@@ -1,9 +1,13 @@
+from experiments.wilds_civilcomments.common import CivilCommentsExperimentConfig
 from experiments.wilds_civilcomments.metrics import (
     binary_auroc,
+    compute_hidden_risk_stress_curve,
+    compute_operating_point_metrics,
     compute_civilcomments_wilds_eval,
     compute_civilcomments_metrics,
     format_split_metrics,
     logits_to_predictions_and_scores,
+    select_threshold_for_target_recall,
 )
 
 
@@ -114,3 +118,65 @@ def test_format_split_metrics_renders_compact_summary() -> None:
 
     assert rendered.startswith("val: accuracy=1.0000")
     assert "worst_group_accuracy=" in rendered
+
+
+def test_select_threshold_for_target_recall_hits_target_from_positive_quantile() -> None:
+    threshold = select_threshold_for_target_recall(
+        labels=[1, 1, 1, 0, 0],
+        positive_scores=[0.9, 0.8, 0.3, 0.7, 0.2],
+        target_recall=2.0 / 3.0,
+    )
+    assert threshold == 0.8
+
+
+def test_compute_operating_point_metrics_tracks_group_fpr_and_fnr() -> None:
+    metadata_rows = [
+        [0, 1, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 1],
+        [0, 1, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0],
+        [1, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 1],
+        [1, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0],
+    ]
+    metrics = compute_operating_point_metrics(
+        labels=[1, 0, 1, 0],
+        positive_scores=[0.9, 0.8, 0.4, 0.3],
+        metadata_rows=metadata_rows,
+        metadata_fields=METADATA_FIELDS,
+        threshold=0.5,
+    )
+
+    assert metrics["precision"] == 0.5
+    assert metrics["recall"] == 0.5
+    assert metrics["fpr"] == 0.5
+    assert metrics["fnr"] == 0.5
+    assert metrics["worst_group_fpr"] == 1.0
+    assert metrics["worst_group_fpr_name"] == "female"
+    assert metrics["worst_group_fnr"] == 1.0
+    assert metrics["worst_group_fnr_name"] == "male"
+
+
+def test_compute_hidden_risk_stress_curve_returns_summary_and_curve() -> None:
+    metadata_rows = [
+        [0, 1, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 1],
+        [0, 1, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0],
+        [1, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 1],
+        [1, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0],
+    ]
+    curve = compute_hidden_risk_stress_curve(
+        labels=[1, 0, 1, 0],
+        positive_scores=[0.9, 0.8, 0.4, 0.3],
+        metadata_rows=metadata_rows,
+        metadata_fields=METADATA_FIELDS,
+        threshold=0.5,
+        base_config=CivilCommentsExperimentConfig(
+            method="erm",
+            download=False,
+        ),
+    )
+
+    assert len(curve["curve"]) == 7
+    assert curve["summary"]["tail_worst_group_accuracy_aurc"] is not None
+    assert curve["summary"]["tail_worst_group_failure_rate_below_floor"] is not None
+    first_rate = curve["curve"][0]["effective_observation_rate"]
+    last_rate = curve["curve"][-1]["effective_observation_rate"]
+    assert first_rate is not None and last_rate is not None
+    assert first_rate >= last_rate

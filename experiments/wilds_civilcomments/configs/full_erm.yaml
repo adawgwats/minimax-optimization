@@ -1,0 +1,15 @@
+method: erm
+dataset_root: data/wilds
+output_dir: outputs/wilds_civilcomments/full_erm
+model_name: distilbert-base-uncased
+max_length: 128
+train_batch_size: 16
+eval_batch_size: 32
+learning_rate: 1.0e-5
+weight_decay: 0.01
+num_train_epochs: 2
+seed: 17
+download: false
+save_strategy: "no"
+save_final_checkpoint: false
+explicit_mnar: false

@@ -24,6 +24,15 @@ SUMMARY_METRICS = (
     ("worst_group_auroc", ("worst_group_auroc",)),
     ("wilds_acc_avg", ("wilds_eval", "acc_avg")),
     ("wilds_acc_wg", ("wilds_eval", "acc_wg")),
+    ("operating_recall", ("operating_point", "recall")),
+    ("operating_precision", ("operating_point", "precision")),
+    ("operating_worst_group_fnr", ("operating_point", "worst_group_fnr")),
+    ("stress_tail_wg_aurc", ("stress_summary", "tail_worst_group_accuracy_aurc")),
+    ("stress_tail_wg_min", ("stress_summary", "tail_worst_group_accuracy_min")),
+    (
+        "stress_tail_fail_rate",
+        ("stress_summary", "tail_worst_group_failure_rate_below_floor"),
+    ),
 )
 
 
@@ -144,6 +153,12 @@ def render_multiseed_summary(summary: Mapping[str, Any]) -> str:
             "worst_group_auroc",
             "wilds_acc_avg",
             "wilds_acc_wg",
+            "operating_recall",
+            "operating_precision",
+            "operating_worst_group_fnr",
+            "stress_tail_wg_aurc",
+            "stress_tail_wg_min",
+            "stress_tail_fail_rate",
         ):
             metric_summary = split_summary.get(metric_name, {})
             lines.append(

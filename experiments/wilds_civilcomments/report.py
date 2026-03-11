@@ -34,8 +34,8 @@ def load_metrics_artifact(path: str | Path) -> dict[str, Any]:
 
 def render_metrics_report(artifacts: list[dict[str, Any]]) -> str:
     lines = [
-        "method        split  accuracy  worst_acc  auroc   worst_auroc  observed/total",
-        "------------  -----  --------  ---------  ------  -----------  --------------",
+        "method        split  accuracy  worst_acc  auroc   worst_auroc  op_recall  op_prec  op_worst_fnr  stress_aurc  stress_min  stress_fail  observed/total",
+        "------------  -----  --------  ---------  ------  -----------  ---------  -------  ------------  -----------  ----------  -----------  --------------",
     ]
     for artifact in artifacts:
         method = artifact.get("config", {}).get("method", "unknown")
@@ -44,6 +44,8 @@ def render_metrics_report(artifacts: list[dict[str, Any]]) -> str:
         observed_summary = "n/a" if observed is None or total is None else f"{observed}/{total}"
         for split in ("val", "test"):
             split_metrics = artifact.get(split, {})
+            operating_point = split_metrics.get("operating_point", {})
+            stress_summary = split_metrics.get("stress_summary", {})
             lines.append(
                 f"{method:<12}"
                 f"  {split:<5}"
@@ -51,6 +53,12 @@ def render_metrics_report(artifacts: list[dict[str, Any]]) -> str:
                 f"  {_format_metric(split_metrics.get('worst_group_accuracy')):>9}"
                 f"  {_format_metric(split_metrics.get('overall_auroc')):>6}"
                 f"  {_format_metric(split_metrics.get('worst_group_auroc')):>11}"
+                f"  {_format_metric(operating_point.get('recall')):>9}"
+                f"  {_format_metric(operating_point.get('precision')):>7}"
+                f"  {_format_metric(operating_point.get('worst_group_fnr')):>12}"
+                f"  {_format_metric(stress_summary.get('tail_worst_group_accuracy_aurc')):>11}"
+                f"  {_format_metric(stress_summary.get('tail_worst_group_accuracy_min')):>10}"
+                f"  {_format_metric(stress_summary.get('tail_worst_group_failure_rate_below_floor')):>11}"
                 f"  {observed_summary:>14}"
             )
     return "\n".join(lines)

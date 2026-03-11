@@ -155,6 +155,14 @@ def test_train_from_config_skips_minimax_builder_for_erm(tmp_path, monkeypatch) 
     monkeypatch.setattr(train_module, "evaluate_split", lambda **_kwargs: ({"overall_accuracy": 1.0}, metrics))
     monkeypatch.setattr(
         train_module,
+        "_predict_split",
+        lambda **_kwargs: train_module.SplitPredictionOutput(
+            predicted_labels=[0, 1],
+            positive_scores=[0.1, 0.9],
+        ),
+    )
+    monkeypatch.setattr(
+        train_module,
         "_build_minimax_config",
         lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("ERM should not call _build_minimax_config")),
     )
