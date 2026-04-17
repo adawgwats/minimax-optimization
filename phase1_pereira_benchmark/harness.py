@@ -15,6 +15,7 @@ without copy-pasting loop logic.
 from __future__ import annotations
 
 import itertools
+import math
 import time
 import warnings
 from dataclasses import dataclass, field
@@ -145,9 +146,12 @@ def run_benchmark(
     verbose: bool = True,
 ) -> pd.DataFrame:
     """Run the full grid. Returns a DataFrame of per-cell-per-method results."""
+    failures_csv = Path(out_csv).with_name("failed_cells.csv") if out_csv is not None else None
+
     # Resume: load existing results and skip completed cells
     completed: set[tuple[str, str, float, int]] = set()
     rows: list[CellResult] = []
+    failed_rows: list[CellResult] = []
     if out_csv is not None and Path(out_csv).exists():
         existing = pd.read_csv(out_csv)
         if not existing.empty:
@@ -158,6 +162,16 @@ def run_benchmark(
             }
             if verbose:
                 print(f"  Resuming: {len(completed)} cells already completed, loaded {len(rows)} rows.")
+    if failures_csv is not None and failures_csv.exists():
+        existing_failures = pd.read_csv(failures_csv)
+        if not existing_failures.empty:
+            failed_rows = [CellResult(**row) for row in existing_failures.to_dict("records")]
+
+    def _checkpoint() -> None:
+        df_partial = pd.DataFrame([vars(r) for r in rows])
+        df_partial.to_csv(out_csv, index=False)
+        if failed_rows:
+            pd.DataFrame([vars(r) for r in failed_rows]).to_csv(failures_csv, index=False)
 
     total = len(datasets) * len(mechanisms) * len(rates) * len(seeds)
     count = 0
@@ -171,19 +185,20 @@ def run_benchmark(
         except Exception as exc:
             print(f"  ERROR {ds_name}/{mech}/{rate}%/seed{seed}: {type(exc).__name__}: {str(exc)[:120]}")
             continue
-        rows.extend(cell_results)
+        good = [r for r in cell_results if not math.isnan(r.test_mse)]
+        bad = [r for r in cell_results if math.isnan(r.test_mse)]
+        rows.extend(good)
+        failed_rows.extend(bad)
         if verbose and count % max(1, total // 50) == 0:
             elapsed = time.perf_counter() - t_start
             eta = elapsed * (total / count - 1) if count > 0 else 0
             print(f"  [{count}/{total}] elapsed {elapsed:.0f}s  ETA {eta:.0f}s")
         if out_csv is not None and count % 100 == 0:
-            # Incremental checkpoint
-            df_partial = pd.DataFrame([vars(r) for r in rows])
-            df_partial.to_csv(out_csv, index=False)
+            _checkpoint()
 
     df = pd.DataFrame([vars(r) for r in rows])
     if out_csv is not None:
-        df.to_csv(out_csv, index=False)
+        _checkpoint()
     return df
 
 
