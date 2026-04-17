@@ -145,14 +145,33 @@ def run_benchmark(
     verbose: bool = True,
 ) -> pd.DataFrame:
     """Run the full grid. Returns a DataFrame of per-cell-per-method results."""
+    # Resume: load existing results and skip completed cells
+    completed: set[tuple[str, str, float, int]] = set()
     rows: list[CellResult] = []
+    if out_csv is not None and Path(out_csv).exists():
+        existing = pd.read_csv(out_csv)
+        if not existing.empty:
+            rows = [CellResult(**row) for row in existing.to_dict("records")]
+            completed = {
+                (r["dataset"], r["mechanism"], float(r["missing_rate_pct"]), int(r["seed"]))
+                for r in existing.to_dict("records")
+            }
+            if verbose:
+                print(f"  Resuming: {len(completed)} cells already completed, loaded {len(rows)} rows.")
+
     total = len(datasets) * len(mechanisms) * len(rates) * len(seeds)
     count = 0
     t_start = time.perf_counter()
     for ds_name, mech, rate, seed in itertools.product(datasets, mechanisms, rates, seeds):
-        cell_results = run_cell(ds_name, mech, rate, seed, methods=methods)
-        rows.extend(cell_results)
         count += 1
+        if (ds_name, mech, float(rate), int(seed)) in completed:
+            continue
+        try:
+            cell_results = run_cell(ds_name, mech, rate, seed, methods=methods)
+        except Exception as exc:
+            print(f"  ERROR {ds_name}/{mech}/{rate}%/seed{seed}: {type(exc).__name__}: {str(exc)[:120]}")
+            continue
+        rows.extend(cell_results)
         if verbose and count % max(1, total // 50) == 0:
             elapsed = time.perf_counter() - t_start
             eta = elapsed * (total / count - 1) if count > 0 else 0
