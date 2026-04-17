@@ -1,0 +1,547 @@
+=== PAGE 1 ===
+1
+Regression example for prediction
+1.1
+Recap
+Suppose we observe a training data set (Xi, Yi)n
+i=1. We use this to estimate the relationship
+between Yi and Xi. We then observe a new observation Xn+1 and wish to predict Yn+1.
+Assume that both Xi and Yi have ﬁnite variances. Then we know from regression analysis
+that the conditional mean is the optimal predictor under mean-squared error:
+E[(Yi −E[Yi|Xi])2] ≤E[(Yi −f(Xi))2]
+for any function f.
+The linear regression model assumes the conditional mean E[Yi|Xi] is linear:
+E[Yi|Xi] = X′
+iβ
+for some vector β. Given an estimate ˆβ of β computed from our training data, we can form
+the predictor
+ˆYn+1 = X′
+n+1 ˆβ .
+We can decompose the prediction error as
+(Yn+1 −ˆYn+1)2 = (Yn+1 −X′
+n+1 ˆβ)2
+= (Yn+1 −X′
+n+1β −X′
+n+1(ˆβ −β))2
+= (Yn+1 −X′
+n+1β)2 + (X′
+n+1(ˆβ −β))2 −2(Yn+1 −X′
+n+1β)X′
+n+1(ˆβ −β) .
+The ﬁnal term has mean zero (use iterated expectations) so the mean-square prediction
+error E[(Yn+1 −ˆYn+1)2] is
+E[(Yn+1 −ˆYn+1)2] = E[(Yn+1 −X′
+n+1β)2] + E[(X′
+n+1(ˆβ −β))2]
+= E[(Yn+1 −X′
+n+1β)2] + E[(ˆβ −β)′E[Xn+1X′
+n+1](ˆβ −β)] ,
+where the ﬁnal line uses independence of Xn+1 and the training data. This argument shows
+that we can make the mean-square prediction error as small as possible by choosing ˆβ to
+minimize
+E[(ˆβ −β)′E[Xn+1X′
+n+1](ˆβ −β)] .
+1
+
+=== PAGE 2 ===
+1.2
+Data corruption: non-response
+Consider the following setup. The true parameter β is deﬁned by
+β = arg min
+b
+E[(Yi −X′
+ib)2] = E[XiX′
+i]−1E[XiYi] .
+If we had training data (Xi, Yi)n
+i=1 we could estimate β using OLS.
+However, the response variables Yi in our training data have been corrupted. Instead of the
+true training data, we actually observe corrupted data (Xi, ˜Yi)n
+i=1 where ˜Yi = Yi for some
+observations i meaning that they respond truthfully if they respond and ˜Yi = 0 for others
+who don’t respond. So, we can write
+(Xi, ˜Yi) = (Xi, ϵiYi)
+for some Bernoulli (i.e. 0-1) random variable ϵi.
+There is a “missing at random” assumption says that ϵi is independent of the Xi, Yi, taking
+the value 1 with probability q (independent of Xi, Yi) and 0 with probability 1 −q.
+But we can also envisage situations where the reason people don’t respond is dependent on
+their Xi, Yi, however (tax-reporting, alcohol or drug consumption, political aﬃliation, etc).
+Here ϵi might take the value 1 with probability qi = q(Xi, Yi), say.
+Regressing ˜Y on X gives
+ˆβOLS = (X′X)−1(X′ ˜Y ) →p E
+
+XiX′
+i
+−1 E
+h
+Xi ˜Yi
+i
+= E
+
+XiX′
+i
+−1 E [q(Xi, Yi)XiYi] .
+If the data are missing at random then q(Xi, Yi) = q (a constant) which we can factor out
+of the expectation to obtain
+ˆβ →p E
+
+XiX′
+i
+−1 E [q(Xi, Yi)XiYi] = q × E
+
+XiX′
+i
+−1 E [XiYi] = q × β .
+So under missing at random we could estimate β by doing OLS of ˜Y on X and dividing
+this by an estimator of q, the fraction of individuals who respond. When individuals are
+strategic so the probability of non-response depends on Xi and/or Yi then this strategy no
+longer works. It is natural to ask whether we can do something “better” in this case.
+2
+
+=== PAGE 3 ===
+1.3
+Min-max problem
+We frame the problem as a min-max problem. The true data (Xi, Yi)n
+i=1 have some ﬁxed
+distribution, say P. Nature is adversarial: it wants to choose the non-response probabilities
+q(Xi, Yi) to make whatever estimator of β that we choose to be as “bad” as possible, in
+the sense that it makes the mean-square prediction error as large as possible. We want to
+choose our estimator to minimize the worst prediction error that nature can throw at us.
+We can write any estimator ˆβ = ˆβ(X1, ˜Y1, . . . , Xn, ˜Yn) = ˆβ(X1, ϵ1Y1, . . . , Xn, ϵnYn). We
+want to choose the estimator ˆβ to solve
+min
+ˆβ
+max
+q∈Q E
+h
+(ˆβ −β)′E[Xn+1X′
+n+1](ˆβ −β)]
+i
+(Problem 1)
+where the expectation is taken with respect to (Xi, Yi) ∼P (ﬁxed) and ϵi|Xi, Yi = 1 with
+probability q(Xi, Yi) and 0 otherwise, for i = 1, . . . , n.
+Let’s simplify this problem a little. Using the fact that β = E[XiX′
+i]−1E[XiYi] and E[XiX′
+i] =
+E[Xn+1X′
+n+1] (because the training data are drawn from the same distribution as what we’re
+trying to predict), we can expand the quadratic to obtain
+min
+ˆβ
+max
+q∈Q
+
+E[YiX′
+i]E[XiX′
+i]−1E[XiYi] + E
+h
+ˆβ′E[XiX′
+i]ˆβ
+i
+−2E
+h
+ˆβ′i
+E[XiYi]
+
+.
+The ﬁrst term doesn’t depend on ˆβ or q so we can drop it. Problem 1 is equivalent to solving
+min
+ˆβ
+max
+q∈Q
+
+E
+h
+ˆβ′E[XiX′
+i]ˆβ
+i
+−2E
+h
+ˆβ
+i′
+E[XiYi]
+
+.
+(Problem 1a)
+This is still a hard problem to solve because the outer minimization is over all functions
+of the data. Let’s simplify this a bit by adding some structure. OLS is a linear estimator,
+meaning that ˆβ = 1
+n
+Pn
+i=1 CiYi for k × 1 vector Ci, where k denotes the dimension of Xi.
+In OLS the Ci = (X′X)−1Xi. We don’t observe Yi, only ˜Yi. So let’s keep things simple and
+consider linear estimators with ˆβ = M( 1
+n
+Pn
+i=1 Xi ˜Yi)+m where M is a k ×k matrix and m
+is a k × 1 vector. The idea is that we may want to rescale diﬀerently from OLS by choosing
+M ̸= (X′X)−1 and perhaps shift the estimator around by choosing some m. We could think
+about diﬀerent rescaling M or diﬀerent shifts m oﬀsetting diﬀerent types of non-response
+q. We don’t know the true non-response type that nature is throwing at us, so we want to
+choose M and m strategically to guard against all q ∈Q.
+3
+
+=== PAGE 4 ===
+Substituting into Problem 1a gives
+min
+M,m max
+q∈Q
+ 
+E
+" 
+M
+ 
+1
+n
+n
+X
+i=1
+Xi ˜Yi
+!
++ m
+!′
+E[XiX′
+i]
+ 
+M
+ 
+1
+n
+n
+X
+i=1
+Xi ˜Yi
+!
++ m
+!#
+−2
+ 
+ME
+"
+1
+n
+n
+X
+i=1
+Xi ˜Yi
+#
++ m
+!′
+E[XiYi]
+!
+.
+As the training sample size n →∞, we have
+1
+n
+n
+X
+i=1
+Xi ˜Yi →p E[Xi ˜Yi] ,
+1
+n
+n
+X
+i=1
+XiXi →p E[XiXi] .
+Therefore, we can treat these as eﬀectively constant and consider instead the approximate
+problem
+min
+M,m max
+q∈Q
+  
+M
+ 
+1
+n
+n
+X
+i=1
+Xi ˜Yi
+!
++ m
+!′  
+1
+n
+n
+X
+i=1
+XiX′
+i
+!  
+M
+ 
+1
+n
+n
+X
+i=1
+Xi ˜Yi
+!
++ m
+!
+−2
+ 
+M
+ 
+1
+n
+n
+X
+i=1
+Xi ˜Yi
+!
++ m
+!′
+E[XiYi]
+!
+.
+(Problem 1b)
+This is almost solvable, only we don’t observe E[XiYi] as it involves to the true data on
+Yi which we don’t see for individuals who choose not to respond. We can use the following
+trick. Note that
+E[XiYi] = E
+
+ϵi
+q(Xi, Yi)XiYi
+
+= E
+
+1
+q(Xi, Yi)Xi ˜Yi
+
+Given any true q, we can consistently estimate E[XiYi] using
+1
+n
+n
+X
+i=1
+1
+q(Xi, Yi)Xi ˜Yi
+This is a function of Yi, but note that ˜Yi = 0 for individuals that don’t respond. Those
+terms drop out of the sum. Moreover, ˜Yi = Yi for those who respond. This means we can
+write
+1
+n
+n
+X
+i=1
+1
+q(Xi, Yi)Xi ˜Yi = 1
+n
+X
+i∈Rn
+1
+q(Xi, ˜Yi)
+Xi ˜Yi
+4
+
+=== PAGE 5 ===
+where Rn ⊂{1, 2, . . . , n} is the indices of individuals that respond. This gives the ﬁnal
+version of our problem:
+min
+M,m max
+q∈Q
+  
+M
+ 
+1
+n
+n
+X
+i=1
+Xi ˜Yi
+!
++ m
+!′  
+1
+n
+n
+X
+i=1
+XiX′
+i
+!  
+M
+ 
+1
+n
+n
+X
+i=1
+Xi ˜Yi
+!
++ m
+!
+−2
+ 
+M
+ 
+1
+n
+n
+X
+i=1
+Xi ˜Yi
+!
++ m
+!′  
+1
+n
+X
+i∈Rn
+1
+q(Xi, ˜Yi)
+Xi ˜Yi
+! !
+.
+(Problem 2)
+For any M, m, and q, every term in this expression can be calculated from the corrupted
+training data (Xi, ˜Yi)n
+i=1. We can now solve this problem using the algorithms for min-max
+problems. Given a solution M∗, m∗to the min-max problem, our estimator would be
+ˆβ∗= M∗
+ 
+1
+n
+n
+X
+i=1
+Xi ˜Yi
+!
++ m∗.
+Then
+ˆYn+1 = X′
+n+1 ˆβ∗
+would (approximately) minimize worst-case mean-square prediction error, where “worst-
+case” is over all potential non-response regimes q ∈Q.
+Diﬀerent Q represent diﬀerent plausible types of non-response. For instance, perhaps ˜Yi is
+blood alcohol content and people are less likely to respond as this variable increases, so Q
+might be a set of decreasing functions q(x, y) = g(y) with g decreasing in y.
+1.4
+Extension
+We can apply the same reasoning to a problem where we don’t observe the Xi of non-
+respondents either. In this case, we observe ( ˜Xi, ˜Yi) = (Xi, Yi) for those that respond and
+(0, 0) for those that don’t. By similar reasoning, the problem becomes
+min
+M,m max
+q∈Q
+  
+M
+ 
+1
+n
+n
+X
+i=1
+˜Xi ˜Yi
+!
++ m
+!′  
+1
+n
+X
+i∈Rn
+1
+q( ˜Xi, ˜Yi)
+˜Xi ˜X′
+i
+!  
+M
+ 
+1
+n
+n
+X
+i=1
+˜Xi ˜Yi
+!
++ m
+!
+−2
+ 
+M
+ 
+1
+n
+n
+X
+i=1
+˜Xi ˜Yi
+!
++ m
+!′  
+1
+n
+X
+i∈Rn
+1
+q( ˜Xi, ˜Yi)
+˜Xi ˜Yi
+! !
+.
+(Problem 3)
+Again, given M, m, and q we can compute every term in this expression from the corrupted
+training data ( ˜Xi, ˜Yi)n
+i=1.
+5
+
+=== PAGE 6 ===
+1.5
+Solving
+Consider Problem 2 where we ﬁx q and want to minimize w.r.t. M and m. We can write
+this problem as
+min
+A
+ (Ab)′W(Ab) −2(Ab)′r
+
+where
+A = [M m]
+b =
+" 
+1
+n
+Pn
+i=1 Xi ˜Yi
+
+1
+#
+W =
+ 
+1
+n
+n
+X
+i=1
+XiX′
+i
+!
+r =
+ 
+1
+n
+X
+i∈Rn
+1
+q(Xi, ˜Yi)
+Xi ˜Yi
+! !
+.
+If d is the dimension of Xi, then A is d × (d + 1), b is (d + 1) × 1, W is d × d, and r is d × 1.
+The trick is to rewrite the problem in terms of vec(A) (the vector formed by stacking the
+columns of A into a vector). Using the rules for vectorization (see: https://en.wikipedia.
+org/wiki/Vectorization_(mathematics)) we get (please check)
+Ab = vec(Ab) = (b′ ⊗Id)vec(A) .
+As vec(A) is a vector, we denote it by a. We then have
+(Ab)′ = a′(b′ ⊗Id)′ = a′(b ⊗Id)
+and so
+(Ab)′W(Ab) −2(Ab)′r = a′(b ⊗Id)W(b′ ⊗Id)a −2a′(b ⊗Id)r .
+We want to minimize w.r.t. a. The FOC is
+(b ⊗Id)W(b′ ⊗Id)a = (b ⊗Id)r .
+The matrix (b ⊗Id)W(b′ ⊗Id) will not be invertible, so there are multiple solutions to this
+linear system. But that’s ﬁne, because any such solution gives the same minimum squared
+6
+
+=== PAGE 7 ===
+prediction error (conditional on q). To solve in Matlab or Julia you would use the backslash
+operator \ or pseudoinverse pinv. I’m not sure what you would use in Python, but there
+must be something as the problem comes up all the time.
+7
