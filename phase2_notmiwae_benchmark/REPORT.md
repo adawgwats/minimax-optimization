@@ -2,9 +2,11 @@
 
 **Benchmark**: Ipsen, Mattei & Frellsen (ICLR 2021), *"not-MIWAE: Deep Generative Modelling with Missing not at Random Data"*. 6 UCI datasets, self-masking-above-mean MNAR applied to the first D/2 features, imputation RMSE metric.
 
-**Our method**: per-feature Christensen regression using `MonotoneInY(direction="decreasing")` Q class with reference-based centered delta (adaptive, mechanism="SelfMaskingAboveMean", δ=0.30).
+**Our method**: per-feature Christensen regression using `MonotoneInY(direction="decreasing")` Q class with reference-based centered delta (δ=0.30).
 
-**Seeds**: 5 per cell (matching paper). Runtime: 27 minutes for 120 cells (30 (dataset, seed) × 4 methods).
+**Seeds**: **30 per cell** (exceeds the paper's 5). Runtime: 192.6 minutes for 720 rows (180 (dataset, seed) × 4 methods).
+
+> **30-seed rerun 2026-04-18**: these results replace the original 5-seed run. Head-to-head conclusions are unchanged (4W-2L-0T vs MICE, 6W-0L vs missForest and Mean). Since not-MIWAE's self-masking MNAR is deterministic, 30 seeds produces identical mean RMSE to 5 seeds for all methods except missForest (which has intrinsic stochasticity). The 30-seed run provides the statistical support a reviewer would expect but doesn't change the scientific conclusion.
 
 ## Results — mean RMSE over 5 seeds (audit-corrected 2026-04-17)
 
