@@ -17,7 +17,7 @@ import numpy as np
 import pandas as pd
 
 PRIMARY_BASELINE = "mice"
-METHOD_UNDER_TEST = "minimax_score"
+METHOD_UNDER_TEST = "christensen_faithful"
 
 
 def load_raw(path: Path) -> pd.DataFrame:
@@ -165,9 +165,9 @@ def generate_report(raw_path: Path, out_path: Path) -> None:
         return
 
     agg = aggregate(df)
-    wl_mice = win_loss_vs_baseline(agg, baseline="mice", method="minimax_score")
-    wl_cc = win_loss_vs_baseline(agg, baseline="complete_case", method="minimax_score")
-    wl_erm = win_loss_vs_baseline(agg, baseline="erm_sgd", method="minimax_score")
+    wl_mice = win_loss_vs_baseline(agg, baseline="mice", method="christensen_faithful")
+    wl_cc = win_loss_vs_baseline(agg, baseline="complete_case", method="christensen_faithful")
+    wl_erm = win_loss_vs_baseline(agg, baseline="minimax_score", method="christensen_faithful")
 
     summary_mice = summarize_outcomes(wl_mice)
     summary_cc = summarize_outcomes(wl_cc)
@@ -200,9 +200,9 @@ def generate_report(raw_path: Path, out_path: Path) -> None:
         lines.append(f"- Failed cells (NaN): {summary_mice['na']}")
     lines.append("")
 
-    lines.append("## Headline: minimax vs ERM (same SGD engine, no adversary)")
+    lines.append("## Headline: christensen_faithful vs minimax_score (DRO variant)")
     lines.append("")
-    lines.append(f"This is the apples-to-apples algorithm comparison — same SGD, same learning schedule, only difference is the adversary.")
+    lines.append(f"This is the two-minimax-estimator comparison: the faithful Christensen (closed-form vec solve + reference-based Q) vs the DRO-inspired SGD variant in minimax_core. Direct measurement of faithful-vs-paraphrase delta.")
     lines.append("")
     lines.append(f"- Wins: **{summary_erm['win']}** ({summary_erm['win_rate']*100:.1f}%)")
     lines.append(f"- Ties: {summary_erm['tie']} ({summary_erm['tie_rate']*100:.1f}%)")
