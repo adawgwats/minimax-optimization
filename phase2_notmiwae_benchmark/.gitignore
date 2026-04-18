@@ -1,0 +1,7 @@
+# Downloaded dataset caches are reproducible from the loaders — don't commit
+data_cache/
+
+# Intermediate run outputs
+results/
+*.pyc
+__pycache__/

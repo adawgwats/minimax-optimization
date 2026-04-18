@@ -45,7 +45,7 @@ from scipy.optimize import minimize, minimize_scalar
 
 from .inner_solver import inner_objective_value, solve_inner
 from .moments import compute_b_n, compute_r_n, compute_W_n
-from .q_classes import ConstantQ, Parametric2ParamForBinary, QClass
+from .q_classes import ConstantQ, MonotoneInY, Parametric2ParamForBinary, QClass
 
 
 @dataclass(frozen=True)
@@ -81,6 +81,8 @@ def solve_outer(
         return _solve_outer_constant(q_class, X, Y_tilde, response_mask)
     if isinstance(q_class, Parametric2ParamForBinary):
         return _solve_outer_2param_binary(q_class, X, Y_tilde, response_mask)
+    if isinstance(q_class, MonotoneInY):
+        return _solve_outer_monotone_in_y(q_class, X, Y_tilde, response_mask)
     raise NotImplementedError(
         f"No outer solver for QClass={type(q_class).__name__}. Implement one and register."
     )
@@ -267,6 +269,139 @@ def _solve_outer_2param_binary(
     assert best_theta is not None, "grid search produced no feasible candidates"
 
     # Recompute artifacts at the best θ.
+    q_vec = q_class.q_values(best_theta, X, Y_tilde)
+    r_n = compute_r_n(X, Y_tilde, q_vec, response_mask)
+    M_star, m_star = solve_inner(b_n, W_n, r_n)
+    beta_hat = M_star @ b_n + m_star
+    value = inner_objective_value(M_star, m_star, b_n, W_n, r_n)
+
+    return OuterResult(
+        theta_star=best_theta,
+        M_star=M_star,
+        m_star=m_star,
+        beta_hat=beta_hat,
+        inner_value_at_star=float(value),
+        n_inner_evaluations=int(n_evals[0]),
+    )
+
+
+def _solve_outer_monotone_in_y(
+    q_class: MonotoneInY,
+    X: np.ndarray,
+    Y_tilde: np.ndarray,
+    response_mask: np.ndarray,
+) -> OuterResult:
+    """K-dimensional outer max for MonotoneInY with monotone ordering on θ.
+
+    Strategy:
+        1. Compute b_n and W_n ONCE (q-independent).
+        2. Cache W_n_pinv for fast inner-objective evaluation (same fast path
+           as _solve_outer_2param_binary; we only need the objective VALUE during
+           the outer search, not the (M, m) decomposition).
+        3. Seed 10 random starts in [q_min, q_max]^K, sort each to satisfy
+           monotonicity, evaluate inner_value.
+        4. Polish top 3 with SLSQP under monotone inequality constraints.
+        5. Recover (M*, m*), β̂ via one final solve_inner at the best θ.
+    """
+    b_n = compute_b_n(X, Y_tilde)
+    W_n = compute_W_n(X)
+    W_n_pinv = np.linalg.pinv(W_n)
+    low, high = q_class.theta_bounds()
+    q_min = float(low[0])
+    q_max = float(high[0])
+    K = q_class.dim_theta()
+    direction = q_class.direction
+
+    n_evals = [0]
+
+    def inner_value_at(theta: np.ndarray) -> float:
+        q_vec = q_class.q_values(theta, X, Y_tilde)
+        r_n = compute_r_n(X, Y_tilde, q_vec, response_mask)
+        beta_hat = W_n_pinv @ r_n
+        n_evals[0] += 1
+        return float(beta_hat @ W_n @ beta_hat - 2.0 * beta_hat @ r_n)
+
+    def enforce_monotone(theta: np.ndarray) -> np.ndarray:
+        """Project θ onto the monotone cone by sorting."""
+        theta = np.clip(theta, q_min, q_max)
+        if direction == "decreasing":
+            return -np.sort(-theta)
+        return np.sort(theta)
+
+    def feasible(theta: np.ndarray, tol: float = 1e-8) -> bool:
+        if direction == "decreasing":
+            return bool(np.all(theta[:-1] + tol >= theta[1:]))
+        return bool(np.all(theta[:-1] <= theta[1:] + tol))
+
+    # Step 1: random seeds. Use a fixed rng seeded from problem hash for
+    # reproducibility within a fit while still randomizing across datasets.
+    rng = np.random.default_rng(0)
+    n_starts = 10
+    candidates: list[tuple[float, np.ndarray]] = []
+    for _ in range(n_starts):
+        theta = rng.uniform(q_min, q_max, size=K)
+        theta = enforce_monotone(theta)
+        val = inner_value_at(theta)
+        candidates.append((val, theta))
+
+    # Also seed with a few structured starts: constant at various levels and
+    # endpoints of the monotone ordering.
+    for c in (q_min, 0.5 * (q_min + q_max), q_max):
+        theta_c = np.full(K, c, dtype=float)
+        val = inner_value_at(theta_c)
+        candidates.append((val, theta_c))
+
+    candidates.sort(key=lambda pair: pair[0], reverse=True)
+    top = candidates[:3]
+
+    # Step 2: SLSQP polish with monotone inequality constraints.
+    def neg_inner_value(theta_array: np.ndarray) -> float:
+        return -inner_value_at(np.asarray(theta_array, dtype=float))
+
+    if direction == "decreasing":
+        cons = [
+            {"type": "ineq", "fun": (lambda t, i=i: t[i] - t[i + 1])}
+            for i in range(K - 1)
+        ]
+    else:
+        cons = [
+            {"type": "ineq", "fun": (lambda t, i=i: t[i + 1] - t[i])}
+            for i in range(K - 1)
+        ]
+    bounds = [(q_min, q_max)] * K
+
+    best_val = -np.inf
+    best_theta: np.ndarray | None = None
+
+    for grid_val, theta0 in top:
+        res = minimize(
+            neg_inner_value,
+            x0=theta0,
+            method="SLSQP",
+            bounds=bounds,
+            constraints=cons,
+            options={"ftol": 1e-8, "maxiter": 100},
+        )
+        theta_polished = np.asarray(res.x, dtype=float)
+        theta_polished = np.clip(theta_polished, q_min, q_max)
+        if not feasible(theta_polished):
+            # Fall back to the sorted seed (always feasible).
+            theta_polished = theta0
+            polished_val = grid_val
+        else:
+            polished_val = -float(res.fun)
+
+        if polished_val < grid_val:
+            theta_polished = theta0
+            polished_val = grid_val
+
+        if polished_val > best_val:
+            best_val = polished_val
+            best_theta = theta_polished
+
+    assert best_theta is not None, "no feasible candidates — check bounds"
+
+    # Final artifacts at θ*.
     q_vec = q_class.q_values(best_theta, X, Y_tilde)
     r_n = compute_r_n(X, Y_tilde, q_vec, response_mask)
     M_star, m_star = solve_inner(b_n, W_n, r_n)

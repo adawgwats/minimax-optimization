@@ -11,6 +11,7 @@ from christensen_core.reference_based_q import (
 )
 from christensen_core.q_classes import (
     ConstantQ,
+    MonotoneInY,
     Parametric2ParamForBinary,
     QClassConfig,
 )
@@ -107,6 +108,25 @@ def test_centered_q_for_mechanisms() -> None:
     # MBOV_Centered -> ConstantQ
     q = centered_q_for("MBOV_Centered", response_mask, delta=delta)
     assert isinstance(q, ConstantQ)
+    assert q.config.q_min == pytest.approx(expected_q_min)
+    assert q.config.q_max == pytest.approx(expected_q_max)
+
+
+def test_centered_q_for_self_masking_above_mean() -> None:
+    """SelfMaskingAboveMean -> MonotoneInY(direction='decreasing', n_knots=5)
+    with config centered on q_hat."""
+    rng = np.random.default_rng(123)
+    response_mask = rng.random(1000) < 0.6
+    q_hat = compute_q_hat(response_mask)
+
+    delta = 0.30
+    expected_q_min = max(0.01, q_hat - delta)
+    expected_q_max = min(1.0, q_hat + delta)
+
+    q = centered_q_for("SelfMaskingAboveMean", response_mask, delta=delta)
+    assert isinstance(q, MonotoneInY)
+    assert q.direction == "decreasing"
+    assert q.n_knots == 5
     assert q.config.q_min == pytest.approx(expected_q_min)
     assert q.config.q_max == pytest.approx(expected_q_max)
 

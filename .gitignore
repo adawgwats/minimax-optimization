@@ -9,3 +9,5 @@ dist/
 venv/
 tmc_cv.pdf
 dssat_runs/
+phase2_notmiwae_benchmark/data_cache/
+phase2_notmiwae_benchmark/results/

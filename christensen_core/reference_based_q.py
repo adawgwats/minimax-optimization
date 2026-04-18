@@ -8,7 +8,7 @@ box of radius delta around q_hat (clamped to [0.01, 1.0]).
 """
 from __future__ import annotations
 import numpy as np
-from .q_classes import QClassConfig, ConstantQ, Parametric2ParamForBinary, QClass
+from .q_classes import QClassConfig, ConstantQ, MonotoneInY, Parametric2ParamForBinary, QClass
 
 def compute_q_hat(response_mask: np.ndarray) -> float:
     """Empirical overall observation rate."""
@@ -44,6 +44,10 @@ def centered_q_for(mechanism: str, response_mask: np.ndarray, delta: float = 0.3
         return Parametric2ParamForBinary(monotone="decreasing", config=config)
     if mechanism in ("MBUV", "MBOV_Centered"):
         return ConstantQ(config=config)
+    if mechanism == "SelfMaskingAboveMean":
+        # Continuous-Y self-masking-above-mean (not-MIWAE benchmark mechanism):
+        # response probability decreases as y increases, so g(y) is decreasing.
+        return MonotoneInY(direction="decreasing", n_knots=5, config=config)
     if mechanism in ("MBIR_Frequentist", "MBIR_Bayesian"):
         raise NotImplementedError(
             f"Mechanism {mechanism!r} requires a DependentOnUnobservedScore QClass (v2)."
@@ -83,6 +87,7 @@ MECHANISM_DELTA: dict[str, float] = {
     "MBOV_Stochastic": 0.25,
     "MBOV_Centered": 0.05,
     "MBUV": 0.05,
+    "SelfMaskingAboveMean": 0.30,  # not-MIWAE mechanism; decreasing-in-y
     # MBIR_Frequentist / MBIR_Bayesian omitted because they're not yet supported;
     # the dispatch raises NotImplementedError before delta is consulted.
 }

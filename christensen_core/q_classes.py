@@ -228,12 +228,57 @@ class MonotoneInY(QClass):
         self.n_knots = n_knots
 
     def dim_theta(self) -> int:
-        raise NotImplementedError("return self.n_knots")
+        return int(self.n_knots)
 
     def theta_bounds(self) -> tuple[np.ndarray, np.ndarray]:
-        raise NotImplementedError("return (q_min * ones(K), q_max * ones(K))")
+        # Plain box bounds; the monotone ordering θ_i <= θ_{i+1} (or the reverse)
+        # is enforced by the outer solver via SLSQP inequality constraints, not
+        # here — same pattern as Parametric2ParamForBinary.
+        K = int(self.n_knots)
+        q_min = self.config.q_min
+        q_max = self.config.q_max
+        return (
+            np.full(K, q_min, dtype=float),
+            np.full(K, q_max, dtype=float),
+        )
 
     def q_values(self, theta: np.ndarray, X: np.ndarray, Y_tilde: np.ndarray) -> np.ndarray:
-        raise NotImplementedError(
-            "Piecewise-linear interpolate theta over the y-knot grid, evaluate at Y_tilde"
-        )
+        """Piecewise-linear interpolation of g(y) over a K-knot grid.
+
+        Protocol:
+            1. Compute the y-range from the OBSERVED (non-zero) Y_tilde entries.
+            2. Place K knots evenly over that range.
+            3. np.interp(Y_tilde, y_knots, theta) gives g(Y_tilde[i]) for each i
+               (for non-respondents where Y_tilde = 0, this returns whatever θ
+               at y_knot[0] extrapolates to — their q is unused by compute_r_n
+               so this is safe).
+            4. Clip to [q_min, q_max].
+
+        Edge case: if Y_tilde is all zeros (no respondents), fall back to
+        the mean of theta (ConstantQ-like behavior).
+        """
+        theta = np.asarray(theta, dtype=float).reshape(-1)
+        Y = np.asarray(Y_tilde, dtype=float).reshape(-1)
+        K = int(self.n_knots)
+        if theta.shape[0] != K:
+            raise ValueError(f"theta has shape {theta.shape}; expected ({K},)")
+
+        observed = Y[Y != 0.0]
+        if observed.size == 0:
+            # No observed labels; fall back to mean(theta) everywhere.
+            out = np.full(Y.shape[0], float(theta.mean()), dtype=float)
+            return self.clip(out)
+
+        y_lo = float(observed.min())
+        y_hi = float(observed.max())
+        if y_hi <= y_lo:
+            # All observed labels are identical; collapse to a single knot value.
+            # np.interp handles degenerate grids poorly, so return mean(theta).
+            out = np.full(Y.shape[0], float(theta.mean()), dtype=float)
+            return self.clip(out)
+
+        y_knots = np.linspace(y_lo, y_hi, K)
+        # np.interp clamps to the endpoint values for x < y_knots[0] and
+        # x > y_knots[-1], which gives the right "outside-range" semantics.
+        out = np.interp(Y, y_knots, theta)
+        return self.clip(out)
