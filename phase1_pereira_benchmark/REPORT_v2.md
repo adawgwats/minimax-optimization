@@ -1,63 +1,86 @@
 # Phase 1 Report — Christensen Minimax vs MICE under MNAR Labels
 
+> **AUDIT-CORRECTED** (2026-04-17): see `../AUDIT_v3_SYNTHESIS.md` for full v3 audit findings. Key corrections from the original report:
+> - **CIs now use t-critical** (t=2.262 for n=10) instead of z=1.96. 3 wins flip to ties.
+> - **MBIR mechanisms (100 cells) excluded transparently** — not supported by our QClass library. The 250-cell total reflects this.
+> - **Oracle leak removed in `christensen_adapter.py`**: the adapter no longer receives privileged mechanism knowledge. Results here are on the PRE-FIX run; re-run with fix is open work.
+> - **Degenerate-baseline caveat**: 31 of 53 wins occur in cells where baselines collapse to a constant predictor (observed Y-positive ≥ 0.99). **Non-degenerate wins: 22 (8.8% of cells)**. See §"Audit-corrected honest numbers" below.
+> - **n=10 seeds, not Pereira's 30**. Scaling to 30 is open work.
+
 **Path A benchmark**: Pereira et al. 2024 MNAR mechanisms applied to label column for regression tasks on 10 UCI medical datasets. See PROTOCOL.md for full spec and declared deviations from Pereira's original imputation-quality benchmark.
 
-**Seeds completed**: 10 per cell (median across cells)
+**Seeds completed**: 10 per cell
 **Total rows**: 34,000
 **Methods**: ['christensen_faithful', 'complete_case', 'erm_sgd', 'heckman', 'ipw_estimated', 'knn_impute', 'mean_impute', 'mice', 'minimax_score', 'oracle']
 **Mechanisms**: ['MBIR_Bayesian', 'MBIR_Frequentist', 'MBOV_Centered', 'MBOV_Higher', 'MBOV_Lower', 'MBOV_Stochastic', 'MBUV']
 **Datasets**: ['bc-coimbra', 'cleveland', 'cmc', 'ctg', 'pima', 'saheart', 'thyroid', 'transfusion', 'vertebral', 'wisconsin']
 
-## Headline: Christensen minimax vs MICE
+## Headline: Christensen minimax vs MICE (audit-corrected)
 
-Across 250 (dataset, mechanism, rate) cells:
+Across 250 (dataset, mechanism, rate) cells (MBIR × 100 cells excluded as not supported):
 
-- **Wins** (95% CI strictly below MICE): **56** (22.4%)
-- **Ties** (95% CIs overlap MICE): 132 (52.8%)
-- **Losses** (95% CI strictly above MICE): 62 (24.8%)
+- **Wins** (95% t-CI strictly below MICE): **53** (21.2%)
+- **Ties** (95% t-CIs overlap MICE): 137 (54.8%)
+- **Losses** (95% t-CI strictly above MICE): 60 (24.0%)
+
+### Audit-corrected honest numbers — non-degenerate cells only
+
+Filtering cells where `observed_y_positive_rate ∈ [0.01, 0.99]` (baselines not collapsed to constant):
+
+- **Non-degenerate wins**: **22 (8.8% of 250 cells)**
+- **Degenerate wins** (baseline-collapse artifacts): 31
+
+The degenerate wins are "Christensen ≠ constant; constant is bad; therefore Christensen wins." They don't represent the framework being generally superior. The 22 non-degenerate wins ARE meaningful signal.
+
+**Mechanism-level honest breakdown**:
+- MBOV_Lower non-degenerate wins: **11** (22% of 50 cells, not 60% as originally headlined)
+- MBOV_Stochastic non-degenerate wins: ~9 (~18%)
+- MBUV, MBIR_*, MBOV_Centered, MBOV_Higher: near zero non-degenerate wins
+
+**These are the defensible numbers for external sharing.** Original 60% / 22.4% figures should not be quoted without the degeneracy caveat.
 
 ## Headline: christensen_faithful vs minimax_score (DRO variant)
 
 This is the two-minimax-estimator comparison: the faithful Christensen (closed-form vec solve + reference-based Q) vs the DRO-inspired SGD variant in minimax_core. Direct measurement of faithful-vs-paraphrase delta.
 
-- Wins: **110** (44.0%)
-- Ties: 76 (30.4%)
-- Losses: 64 (25.6%)
+- Wins: **105** (42.0%)
+- Ties: 86 (34.4%)
+- Losses: 59 (23.6%)
 
 ## Win/loss vs MICE by MNAR mechanism
 
 | mechanism | wins | ties | losses | total | win_rate | mean_mse_diff_pct |
 | --- | --- | --- | --- | --- | --- | --- |
 | MBOV_Centered | 3 | 28 | 19 | 50 | 0.060 | 494622.028 |
-| MBOV_Higher | 0 | 27 | 23 | 50 | 0.000 | 1082184.538 |
-| MBOV_Lower | 30 | 18 | 2 | 50 | 0.600 | -24.099 |
-| MBOV_Stochastic | 23 | 25 | 2 | 50 | 0.460 | 10035.538 |
-| MBUV | 0 | 34 | 16 | 50 | 0.000 | 315513.314 |
+| MBOV_Higher | 0 | 28 | 22 | 50 | 0.000 | 1082184.538 |
+| MBOV_Lower | 28 | 20 | 2 | 50 | 0.560 | -24.099 |
+| MBOV_Stochastic | 22 | 26 | 2 | 50 | 0.440 | 10035.538 |
+| MBUV | 0 | 35 | 15 | 50 | 0.000 | 315513.314 |
 
 ## Win/loss vs MICE by missing rate
 
 | missing_rate_pct | wins | ties | losses | total | win_rate | mean_mse_diff_pct |
 | --- | --- | --- | --- | --- | --- | --- |
 | 10.000 | 0.000 | 42.000 | 8.000 | 50.000 | 0.000 | 61521.287 |
-| 20.000 | 6.000 | 31.000 | 13.000 | 50.000 | 0.120 | 169598.844 |
-| 40.000 | 11.000 | 25.000 | 14.000 | 50.000 | 0.220 | 473593.064 |
-| 60.000 | 19.000 | 18.000 | 13.000 | 50.000 | 0.380 | 1073259.504 |
+| 20.000 | 5.000 | 32.000 | 13.000 | 50.000 | 0.100 | 169598.844 |
+| 40.000 | 11.000 | 27.000 | 12.000 | 50.000 | 0.220 | 473593.064 |
+| 60.000 | 17.000 | 20.000 | 13.000 | 50.000 | 0.340 | 1073259.504 |
 | 80.000 | 20.000 | 16.000 | 14.000 | 50.000 | 0.400 | 124358.620 |
 
 ## Win/loss vs MICE by dataset
 
 | dataset | wins | ties | losses | total | win_rate | mean_mse_diff_pct |
 | --- | --- | --- | --- | --- | --- | --- |
-| bc-coimbra | 3 | 19 | 3 | 25 | 0.120 | 9.433 |
-| cleveland | 5 | 13 | 7 | 25 | 0.200 | 7.476 |
+| bc-coimbra | 3 | 20 | 2 | 25 | 0.120 | 9.433 |
+| cleveland | 4 | 15 | 6 | 25 | 0.160 | 7.476 |
 | cmc | 8 | 11 | 6 | 25 | 0.320 | -7.250 |
 | ctg | 6 | 1 | 18 | 25 | 0.240 | 3804618.134 |
 | pima | 6 | 16 | 3 | 25 | 0.240 | -4.762 |
 | saheart | 6 | 18 | 1 | 25 | 0.240 | -5.861 |
 | thyroid | 4 | 19 | 2 | 25 | 0.160 | 2.322 |
 | transfusion | 6 | 17 | 2 | 25 | 0.240 | -7.124 |
-| vertebral | 6 | 10 | 9 | 25 | 0.240 | 16.256 |
-| wisconsin | 6 | 8 | 11 | 25 | 0.240 | 34.014 |
+| vertebral | 5 | 11 | 9 | 25 | 0.200 | 16.256 |
+| wisconsin | 5 | 9 | 11 | 25 | 0.200 | 34.014 |
 
 ## Most favorable cells (minimax beats MICE by largest %)
 

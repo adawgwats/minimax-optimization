@@ -24,16 +24,34 @@ def load_raw(path: Path) -> pd.DataFrame:
     return pd.read_csv(path)
 
 
+def _t_critical(n: int, conf: float = 0.95) -> float:
+    """Two-sided t-critical value for small samples. For n>=30 converges to z=1.96.
+
+    Pre-audit code hard-coded z=1.96. For n=10 seeds the correct value is 2.262,
+    which slightly widens CIs and flips 3 cells from win to tie. See
+    AUDIT_v3_SYNTHESIS.md Finding #3.
+    """
+    from scipy import stats
+    if n <= 1:
+        return float("inf")
+    return float(stats.t.ppf((1 + conf) / 2, df=n - 1))
+
+
 def aggregate(df: pd.DataFrame) -> pd.DataFrame:
-    """Per (dataset, mechanism, rate, method): mean, std, 95% CI over seeds."""
+    """Per (dataset, mechanism, rate, method): mean, std, 95% CI over seeds.
+
+    Uses t-critical (not z) for small-sample correctness. For n>=30 t->z.
+    """
     grouped = df.groupby(["dataset", "mechanism", "missing_rate_pct", "method"])["test_mse"]
     n = grouped.count()
     mean = grouped.mean()
     std = grouped.std(ddof=1)
     se = std / np.sqrt(n.clip(lower=1))
+    # Per-group t-critical (same n across methods in a cell, but defensive)
+    t_crit = n.apply(_t_critical)
     return pd.DataFrame({
         "mean_mse": mean, "std_mse": std, "n_seeds": n,
-        "ci_lower": mean - 1.96 * se, "ci_upper": mean + 1.96 * se,
+        "ci_lower": mean - t_crit * se, "ci_upper": mean + t_crit * se,
     }).reset_index()
 
 

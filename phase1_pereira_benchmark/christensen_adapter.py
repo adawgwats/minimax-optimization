@@ -31,19 +31,26 @@ import pandas as pd
 class ChristensenRegressor:
     """Adapter: Pereira mechanism name + data q_hat -> reference-based QClass -> ChristensenEstimator.
 
-    Q-specification policy:
-      - If `delta` is None (default), use `adaptive_centered_q_for` which looks up a
-        mechanism-calibrated delta from the domain-knowledge table in
-        `christensen_core.reference_based_q.MECHANISM_DELTA`. Mechanisms not in the
-        table fall back to `DEFAULT_DELTA=0.30`. This is the right choice when the
-        benchmark protocol fixes the mechanism (as in Pereira).
-      - If `delta` is a float, it overrides the mechanism prior and uses that fixed
-        radius for the ball around q_hat. Use this in deployment where mechanism
-        metadata is unavailable, or for ablations that probe the delta tradeoff.
+    Q-specification policy (post-audit 2026-04-17):
+      - Default behavior: use fixed `delta=0.30` regardless of mechanism_name. The
+        mechanism_name is used ONLY for Q-class dispatch (e.g., MBOV_Lower -> monotone
+        increasing; MBUV -> constant). This avoids the "oracle leak" where the
+        benchmark passes pre-calibrated deltas per mechanism, giving the estimator
+        unfair advantage over baselines.
+      - Opt-in: if `use_mechanism_prior=True`, the adapter looks up mechanism-calibrated
+        delta from MECHANISM_DELTA. This is legitimate ONLY when the user has genuine
+        domain knowledge of the selection mechanism in deployment (not a benchmark
+        protocol leak). For the Pereira benchmark, this flag is DISABLED by default.
+      - Explicit `delta=<float>` always wins. For ablations.
+
+    Historical note: pre-audit, the default was `delta=None` + `adaptive_centered_q_for`,
+    which constituted an oracle leak because the benchmark supplied the true mechanism.
+    Removed 2026-04-17 per AUDIT_v3_SYNTHESIS.md Finding #2.
     """
     mechanism_name: str
     fit_intercept: bool = True
-    delta: float | None = None  # None = adaptive; float = fixed override
+    delta: float | None = 0.30  # Default fixed to avoid oracle leak
+    use_mechanism_prior: bool = False  # Opt-in for legitimate domain-knowledge use
 
     def fit(
         self,
@@ -51,7 +58,11 @@ class ChristensenRegressor:
         y: np.ndarray,
         response_mask: np.ndarray,
     ) -> "ChristensenRegressor":
-        """Dispatch on mechanism_name to obtain reference-based Q class, then fit ChristensenEstimator."""
+        """Fit the Christensen estimator with a reference-based Q.
+
+        Default uses `delta=0.30` centered on q_hat. Mechanism-prior lookup is
+        opt-in via `use_mechanism_prior=True` to prevent benchmark oracle leaks.
+        """
         from christensen_core.reference_based_q import (
             adaptive_centered_q_for,
             centered_q_for,
@@ -59,10 +70,11 @@ class ChristensenRegressor:
         from christensen_core.estimator import ChristensenEstimator
 
         mask = np.asarray(response_mask, dtype=bool)
-        if self.delta is None:
+        if self.use_mechanism_prior and self.delta is None:
             q_cls = adaptive_centered_q_for(self.mechanism_name, mask)
         else:
-            q_cls = centered_q_for(self.mechanism_name, mask, delta=self.delta)
+            effective_delta = self.delta if self.delta is not None else 0.30
+            q_cls = centered_q_for(self.mechanism_name, mask, delta=effective_delta)
         self._inner = ChristensenEstimator(q_class=q_cls, fit_intercept=self.fit_intercept)
 
         X_arr = X.to_numpy(dtype=float) if isinstance(X, pd.DataFrame) else np.asarray(X, dtype=float)
